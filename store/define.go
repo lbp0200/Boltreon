@@ -5,20 +5,24 @@ import (
 )
 
 const (
-	KeyTypeString = "STRING"
-	KeyTypeList   = "LIST"
-	KeyTypeHash   = "HASH"
-	KeyTypeSet    = "SET"
-	KeyTypeZSet   = "ZSET"
+	UnderScore       = "_"
+	KeyTypeString    = "STRING"
+	KeyTypeList      = "LIST"
+	KeyTypeHash      = "HASH"
+	KeyTypeSet       = "SET"
+	KeyTypeSortedSet = "SORTEDSET"
+
+	sortedSetIndex = "_INDEX|"
+	sortedSetData  = "_DATA_"
 )
 
 var (
-	keyTypeBytes    = []byte("TYPE:")
-	prefixKeyString = []byte("STRING:")
-	prefixKeyList   = []byte("LIST:")
-	prefixKeyHash   = []byte("HASH:")
-	prefixKeySet    = []byte("SET:")
-	prefixKeyZSet   = []byte("ZSET:")
+	keyTypeBytes    = []byte("TYPE_")
+	prefixKeyString = []byte("STRING_")
+	prefixKeyList   = []byte("LIST_")
+	prefixKeyHash   = []byte("HASH_")
+	prefixKeySet    = []byte("SET_")
+	prefixKeyZSet   = []byte("SORTEDSET_")
 )
 
 type BadgerStore struct {
@@ -34,8 +38,8 @@ func NewBadgerStore(path string) (*BadgerStore, error) {
 	return &BadgerStore{db: db}, nil
 }
 
-func (s *BadgerStore) Close() {
-	s.db.Close()
+func (s *BadgerStore) Close() error {
+	return s.db.Close()
 }
 
 func TypeKeyGet(strKey string) []byte {
@@ -44,7 +48,7 @@ func TypeKeyGet(strKey string) []byte {
 	return bKey
 }
 
-func keyBadgetGet(bType, bKey []byte) []byte {
+func keyBadgerGet(bType, bKey []byte) []byte {
 	bKey = append(bType, bKey...)
 	return bKey
 }

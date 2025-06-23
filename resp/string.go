@@ -28,7 +28,12 @@ func HandleSet(conn net.Conn, args [][]byte, store *store.BadgerStore) {
 			}
 		}
 	}
-	err := store.Set(args[0], args[1], ttl)
+	var err error
+	if ttl > 0 {
+		err = store.SetWithTTL(args[0], args[1], ttl)
+	} else {
+		err = store.Set(args[0], args[1])
+	}
 	if err != nil {
 		conn.Write(Encode(err))
 	} else {

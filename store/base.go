@@ -32,7 +32,7 @@ func (s *BadgerStore) Del(key string) error {
 		case KeyTypeSet:
 			// 处理 type4 的删除逻辑
 			return txn.Delete(bKey)
-		case KeyTypeZSet:
+		case KeyTypeSortedSet:
 			// 处理 type5 的删除逻辑
 			return txn.Delete(bKey)
 		default:
@@ -46,7 +46,7 @@ func (s *BadgerStore) DelString(key string) error {
 	logFuncTag := "BadgerStoreDelString"
 	bKey := []byte(key)
 	badgerTypeKey := TypeKeyGet(key)
-	badgerValueKey := keyBadgetGet(prefixKeyString, bKey)
+	badgerValueKey := keyBadgerGet(prefixKeyString, bKey)
 	return s.db.Update(func(txn *badger.Txn) error {
 		errDel := txn.Delete(badgerTypeKey)
 		if errDel != nil {
