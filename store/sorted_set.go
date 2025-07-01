@@ -15,15 +15,21 @@ type ZSetMember struct {
 	Score  float64
 }
 
-// encodeScore 改进的编码函数，确保负分数正确排序
+// ZSetsMetaValue 定义元数据结构体，存储成员数量和版本
+type ZSetsMetaValue struct {
+	Card    int64
+	Version uint32
+}
+
+// encodeScore 优化分数编码，确保负分数正确排序
 func encodeScore(score float64) []byte {
 	bits := math.Float64bits(score)
 	b := make([]byte, 8)
-	// 对于正数，翻转符号位（0x8000000000000000）以确保负数排在前面
+	// 翻转符号位以确保负分数排在正分数前
 	if score >= 0 {
 		bits = bits ^ 0x8000000000000000
 	} else {
-		// 对于负数，翻转所有位并保留符号位
+		// 负分数翻转所有位以保持绝对值排序
 		bits = ^bits
 	}
 	binary.BigEndian.PutUint64(b, bits)
@@ -41,12 +47,44 @@ func decodeScore(b []byte) float64 {
 	return math.Float64frombits(bits)
 }
 
-func sortedSetKeyIndex(zSetName, member string) []byte {
-	return keyBadgerGet(prefixKeySortedSetBytes, []byte(zSetName+sortedSetIndex+member))
+// encodeMeta 编码元数据
+func encodeMeta(meta ZSetsMetaValue) []byte {
+	b := make([]byte, 12)
+	binary.BigEndian.PutUint64(b[:8], uint64(meta.Card))
+	binary.BigEndian.PutUint32(b[8:], meta.Version)
+	return b
+}
+
+// decodeMeta 解码元数据
+func decodeMeta(b []byte) (ZSetsMetaValue, error) {
+	if len(b) != 12 {
+		return ZSetsMetaValue{}, errors.New("invalid meta data")
+	}
+	card := int64(binary.BigEndian.Uint64(b[:8]))
+	version := binary.BigEndian.Uint32(b[8:])
+	return ZSetsMetaValue{Card: card, Version: version}, nil
+}
+
+func sortedSetKeyMeta(zSetName string) []byte {
+	return keyBadgerGet(prefixKeySortedSetBytes, []byte(zSetName+"meta"))
+}
+
+func sortedSetKeyIndex(zSetName string, score float64, member string, version uint32) []byte {
+	key := []byte(zSetName + sortedSetIndex)
+	key = append(key, encodeScore(score)...)
+	key = append(key, []byte(UnderScore+member)...)
+	key = append(key, encodeVersion(version)...)
+	return keyBadgerGet(prefixKeySortedSetBytes, key)
 }
 
 func sortedSetKeyMember(zSetName, member string) []byte {
 	return keyBadgerGet(prefixKeySortedSetBytes, []byte(zSetName+sortedSetData+member))
+}
+
+func encodeVersion(version uint32) []byte {
+	b := make([]byte, 4)
+	binary.BigEndian.PutUint32(b, version)
+	return b
 }
 
 // ZAdd 添加或更新成员分数
@@ -60,12 +98,40 @@ func (s *BadgerStore) ZAdd(zSetName string, members []ZSetMember) error {
 			return err
 		}
 
+		// 获取元数据
+		metaKey := sortedSetKeyMeta(zSetName)
+		var meta ZSetsMetaValue
+		item, err := txn.Get(metaKey)
+		if err == nil {
+			err = item.Value(func(val []byte) error {
+				meta, err = decodeMeta(val)
+				return err
+			})
+			if err != nil {
+				return err
+			}
+		} else if !errors.Is(err, badger.ErrKeyNotFound) {
+			return err
+		}
+		newMembers := int64(len(members))
+		meta.Version++
+
+		// 批量收集操作
+		type operation struct {
+			dataKey     []byte
+			indexKey    []byte
+			oldIndexKey []byte
+			score       []byte
+		}
+		ops := make([]operation, 0, len(members))
+
 		for _, m := range members {
 			member := m.Member
 			score := m.Score
 			dataKey := sortedSetKeyMember(zSetName, member)
 
 			// 检查旧分数
+			var oldScore float64
 			item, err := txn.Get(dataKey)
 			if err == nil {
 				var oldScoreBytes []byte
@@ -76,32 +142,45 @@ func (s *BadgerStore) ZAdd(zSetName string, members []ZSetMember) error {
 				if err != nil {
 					return err
 				}
-				oldScore := decodeScore(oldScoreBytes)
-
-				// 删除旧索引
-				oldIndexKey := []byte(zSetName + sortedSetIndex)
-				oldIndexKey = append(oldIndexKey, encodeScore(oldScore)...)
-				oldIndexKey = append(oldIndexKey, []byte(UnderScore+member)...)
-				if err := txn.Delete(oldIndexKey); err != nil {
-					return err
-				}
+				oldScore = decodeScore(oldScoreBytes)
+				newMembers-- // 替换现有成员，计数不变
 			} else if !errors.Is(err, badger.ErrKeyNotFound) {
 				return err
 			}
 
-			// 写入新数据
-			if err := txn.Set(dataKey, encodeScore(score)); err != nil {
+			// 准备操作
+			op := operation{
+				dataKey:  dataKey,
+				indexKey: sortedSetKeyIndex(zSetName, score, member, meta.Version),
+				score:    encodeScore(score),
+			}
+			if err == nil {
+				op.oldIndexKey = sortedSetKeyIndex(zSetName, oldScore, member, meta.Version-1)
+			}
+			ops = append(ops, op)
+		}
+
+		// 更新元数据计数
+		meta.Card += newMembers
+		if err := txn.Set(metaKey, encodeMeta(meta)); err != nil {
+			return err
+		}
+
+		// 批量执行操作
+		for _, op := range ops {
+			if op.oldIndexKey != nil {
+				if err := txn.Delete(op.oldIndexKey); err != nil {
+					return err
+				}
+			}
+			if err := txn.Set(op.dataKey, op.score); err != nil {
 				return err
 			}
-
-			// 写入新索引
-			newIndexKey := []byte(zSetName + sortedSetIndex)
-			newIndexKey = append(newIndexKey, encodeScore(score)...)
-			newIndexKey = append(newIndexKey, []byte(UnderScore+member)...)
-			if err := txn.Set(newIndexKey, nil); err != nil {
+			if err := txn.Set(op.indexKey, nil); err != nil {
 				return err
 			}
 		}
+
 		return nil
 	})
 }
@@ -113,6 +192,7 @@ func (s *BadgerStore) ZRangeByScore(zSetName string, minScore, maxScore float64,
 		opts := badger.DefaultIteratorOptions
 		prefix := []byte(zSetName + sortedSetIndex)
 		opts.Prefix = prefix
+		opts.PrefetchValues = false
 
 		it := txn.NewIterator(opts)
 		defer it.Close()
@@ -123,13 +203,12 @@ func (s *BadgerStore) ZRangeByScore(zSetName string, minScore, maxScore float64,
 			item := it.Item()
 			key := item.Key()
 
-			// 提取分数和成员
 			parts := bytes.Split(key, []byte(UnderScore))
 			if len(parts) < 4 {
 				continue
 			}
 			member := string(parts[3])
-			scoreBytes := key[len(prefix) : len(key)-len(UnderScore+member)]
+			scoreBytes := key[len(prefix) : len(key)-len(UnderScore+member)-4]
 			score := decodeScore(scoreBytes)
 
 			if score > maxScore {
@@ -162,6 +241,22 @@ func (s *BadgerStore) ZRem(zSetName, member string) error {
 			return err
 		}
 
+		// 获取元数据
+		metaKey := sortedSetKeyMeta(zSetName)
+		var meta ZSetsMetaValue
+		item, err = txn.Get(metaKey)
+		if err == nil {
+			err = item.Value(func(val []byte) error {
+				meta, err = decodeMeta(val)
+				return err
+			})
+			if err != nil {
+				return err
+			}
+		} else if !errors.Is(err, badger.ErrKeyNotFound) {
+			return err
+		}
+
 		var scoreBytes []byte
 		err = item.Value(func(val []byte) error {
 			scoreBytes = val
@@ -176,10 +271,17 @@ func (s *BadgerStore) ZRem(zSetName, member string) error {
 			return err
 		}
 
-		indexKey := []byte(zSetName + sortedSetIndex)
-		indexKey = append(indexKey, encodeScore(score)...)
-		indexKey = append(indexKey, []byte(UnderScore+member)...)
-		return txn.Delete(indexKey)
+		indexKey := sortedSetKeyIndex(zSetName, score, member, meta.Version)
+		if err := txn.Delete(indexKey); err != nil {
+			return err
+		}
+
+		// 更新元数据
+		meta.Card--
+		if meta.Card <= 0 {
+			return txn.Delete(metaKey)
+		}
+		return txn.Set(metaKey, encodeMeta(meta))
 	})
 }
 
@@ -212,14 +314,24 @@ func (s *BadgerStore) ZRange(zSetName string, start, stop int64) ([]*ZSetMember,
 		opts := badger.DefaultIteratorOptions
 		prefix := []byte(zSetName + sortedSetIndex)
 		opts.Prefix = prefix
+		opts.PrefetchValues = false
 
-		it := txn.NewIterator(opts)
-		defer it.Close()
-
-		// 计算总数以处理负索引
-		totalCount := int64(0)
-		for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
-			totalCount++
+		// 获取元数据
+		metaKey := sortedSetKeyMeta(zSetName)
+		var totalCount int64
+		item, err := txn.Get(metaKey)
+		if err == nil {
+			var meta ZSetsMetaValue
+			err = item.Value(func(val []byte) error {
+				meta, err = decodeMeta(val)
+				return err
+			})
+			if err != nil {
+				return err
+			}
+			totalCount = meta.Card
+		} else if !errors.Is(err, badger.ErrKeyNotFound) {
+			return err
 		}
 
 		// 处理负索引
@@ -239,8 +351,10 @@ func (s *BadgerStore) ZRange(zSetName string, start, stop int64) ([]*ZSetMember,
 			return nil
 		}
 
+		it := txn.NewIterator(opts)
+		defer it.Close()
+
 		currentIndex := int64(0)
-		it.Rewind()
 		for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
 			if currentIndex < start {
 				currentIndex++
@@ -258,7 +372,7 @@ func (s *BadgerStore) ZRange(zSetName string, start, stop int64) ([]*ZSetMember,
 				continue
 			}
 			member := string(parts[3])
-			scoreBytes := key[len(prefix) : len(key)-len(UnderScore+member)]
+			scoreBytes := key[len(prefix) : len(key)-len(UnderScore+member)-4]
 			score := decodeScore(scoreBytes)
 
 			results = append(results, &ZSetMember{Member: member, Score: score})
@@ -295,6 +409,7 @@ func (s *BadgerStore) ZSetDel(zSetName string) error {
 			}
 		}
 
-		return nil
+		// 删除元数据
+		return txn.Delete(sortedSetKeyMeta(zSetName))
 	})
 }
