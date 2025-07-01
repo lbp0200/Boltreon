@@ -36,16 +36,24 @@ func decodeScore(b []byte) float64 {
 }
 
 func sortedSetKeyIndex(zSetName, member string) []byte {
-	return []byte(sortedSetPrefix + zSetName + sortedSetData + member)
+	return keyBadgerGet(prefixKeySortedSetBytes, []byte(zSetName+sortedSetIndex+member))
 }
 
 func sortedSetKeyMember(zSetName, member string) []byte {
-	return []byte(sortedSetPrefix + zSetName + sortedSetData + member)
+	return keyBadgerGet(prefixKeySortedSetBytes, []byte(zSetName+sortedSetData+member))
 }
 
 // ZAdd 添加或更新成员分数
 func (s *BadgerStore) ZAdd(zSetName string, members []ZSetMember) error {
+	if len(members) == 0 {
+		return nil
+	}
 	return s.db.Update(func(txn *badger.Txn) error {
+		badgerTypeKey := TypeOfKeyGet(zSetName)
+		err := txn.Set(badgerTypeKey, []byte(KeyTypeSortedSet))
+		if err != nil {
+			return err
+		}
 		// 遍历所有待添加的成员
 		for _, m := range members {
 			member := m.Member
@@ -64,7 +72,7 @@ func (s *BadgerStore) ZAdd(zSetName string, members []ZSetMember) error {
 				// 2. 删除旧的索引 Key
 				oldIndexKey := []byte(zSetName + sortedSetIndex)
 				oldIndexKey = append(oldIndexKey, encodeScore(oldScore)...)
-				oldIndexKey = append(oldIndexKey, []byte("|"+member)...)
+				oldIndexKey = append(oldIndexKey, []byte(UnderScore+member)...)
 				if err := txn.Delete(oldIndexKey); err != nil {
 					return err
 				}
@@ -81,7 +89,7 @@ func (s *BadgerStore) ZAdd(zSetName string, members []ZSetMember) error {
 			// 写入索引 Key
 			newIndexKey := []byte(zSetName + sortedSetIndex)
 			newIndexKey = append(newIndexKey, encodeScore(score)...)
-			newIndexKey = append(newIndexKey, []byte("|"+member)...)
+			newIndexKey = append(newIndexKey, []byte(UnderScore+member)...)
 			if err := txn.Set(newIndexKey, nil); err != nil {
 				return err
 			}
@@ -95,7 +103,7 @@ func (s *BadgerStore) ZRangeByScore(zSetName string, start, stop int) ([]ZSetMem
 	var results []ZSetMember
 	err := s.db.View(func(txn *badger.Txn) error {
 		opts := badger.DefaultIteratorOptions
-		prefix := []byte(zSetName + "|index|")
+		prefix := []byte(zSetName + sortedSetIndex)
 		opts.Prefix = prefix
 
 		it := txn.NewIterator(opts)
@@ -115,7 +123,7 @@ func (s *BadgerStore) ZRangeByScore(zSetName string, start, stop int) ([]ZSetMem
 			key := item.Key()
 
 			// 解析 member 和 score
-			parts := bytes.Split(key, []byte("|"))
+			parts := bytes.Split(key, []byte(UnderScore))
 			member := string(parts[3])
 
 			// 从 key 中提取 score 的字节部分
@@ -134,7 +142,7 @@ func (s *BadgerStore) ZRangeByScore(zSetName string, start, stop int) ([]ZSetMem
 // ZRem 删除成员
 func (s *BadgerStore) ZRem(zSetName, member string) error {
 	return s.db.Update(func(txn *badger.Txn) error {
-		dataKey := []byte(zSetName + "|data|" + member)
+		dataKey := []byte(zSetName + sortedSetData + member)
 
 		item, err := txn.Get(dataKey)
 		if errors.Is(err, badger.ErrKeyNotFound) {
@@ -157,9 +165,9 @@ func (s *BadgerStore) ZRem(zSetName, member string) error {
 		}
 
 		// 2. 删除索引 Key
-		indexKey := []byte(zSetName + "|index|")
+		indexKey := []byte(zSetName + sortedSetIndex)
 		indexKey = append(indexKey, encodeScore(score)...)
-		indexKey = append(indexKey, []byte("|"+member)...)
+		indexKey = append(indexKey, []byte(UnderScore+member)...)
 		if err := txn.Delete(indexKey); err != nil {
 			return err
 		}
@@ -171,7 +179,7 @@ func (s *BadgerStore) ZRem(zSetName, member string) error {
 // ZScore 获取成员分数
 func (s *BadgerStore) ZScore(zSetName, member string) (float64, error) {
 	var score float64
-	dataKey := []byte(zSetName + "|data|" + member)
+	dataKey := []byte(zSetName + sortedSetData + member)
 
 	// 使用只读事务查询数据
 	err := s.db.View(func(txn *badger.Txn) error {
@@ -202,7 +210,7 @@ func (s *BadgerStore) ZRange(zSetName []byte, start, stop int64) ([]*ZSetMember,
 	err := s.db.View(func(txn *badger.Txn) error {
 		opts := badger.DefaultIteratorOptions
 		prefix := append([]byte{}, zSetName...)
-		prefix = append(prefix, []byte("|index|")...)
+		prefix = append(prefix, []byte(sortedSetIndex)...)
 		opts.Prefix = prefix
 
 		it := txn.NewIterator(opts)
@@ -245,7 +253,7 @@ func (s *BadgerStore) ZRange(zSetName []byte, start, stop int64) ([]*ZSetMember,
 			key := item.Key()
 
 			// 解析 member 和 score
-			parts := bytes.Split(key, []byte("|"))
+			parts := bytes.Split(key, []byte(UnderScore))
 			member := string(parts[3])
 
 			// 从 key 中提取 score 的字节部分
@@ -265,7 +273,8 @@ func (s *BadgerStore) ZRange(zSetName []byte, start, stop int64) ([]*ZSetMember,
 func (s *BadgerStore) ZSetDel(zSetName string) error {
 	return s.db.Update(func(txn *badger.Txn) error {
 		// 删除数据相关的键
-		dataPrefix := []byte(zSetName + "|data|")
+
+		dataPrefix := []byte(zSetName + sortedSetData)
 		opts := badger.DefaultIteratorOptions
 		opts.Prefix = dataPrefix
 		it := txn.NewIterator(opts)
@@ -280,7 +289,7 @@ func (s *BadgerStore) ZSetDel(zSetName string) error {
 		}
 
 		// 删除索引相关的键
-		indexPrefix := []byte(zSetName + "|index|")
+		indexPrefix := []byte(zSetName + sortedSetIndex)
 		opts.Prefix = indexPrefix
 		it = txn.NewIterator(opts)
 		defer it.Close()

@@ -12,17 +12,17 @@ const (
 	KeyTypeSet       = "SET"
 	KeyTypeSortedSet = "SORTEDSET"
 
-	sortedSetIndex = "_INDEX|"
+	sortedSetIndex = "_INDEX_"
 	sortedSetData  = "_DATA_"
 )
 
 var (
-	keyTypeBytes    = []byte("TYPE_")
-	prefixKeyString = []byte("STRING_")
-	prefixKeyList   = []byte("LIST_")
-	prefixKeyHash   = []byte("HASH_")
-	prefixKeySet    = []byte("SET_")
-	prefixKeyZSet   = []byte("SORTEDSET_")
+	prefixKeyTypeBytes      = []byte("TYPE_")
+	prefixKeyStringBytes    = []byte("STRING_")
+	prefixKeyListBytes      = []byte("LIST_")
+	prefixKeyHashBytes      = []byte("HASH_")
+	prefixKeySetBytes       = []byte("SET_")
+	prefixKeySortedSetBytes = []byte("SORTEDSET_")
 )
 
 type BadgerStore struct {
@@ -42,12 +42,14 @@ func (s *BadgerStore) Close() error {
 	return s.db.Close()
 }
 
-func TypeKeyGet(strKey string) []byte {
+// TypeOfKeyGet 用于生成存储类型的键
+func TypeOfKeyGet(strKey string) []byte {
 	bKey := []byte(strKey)
-	bKey = append(keyTypeBytes, bKey...)
+	bKey = append(prefixKeyTypeBytes, bKey...)
 	return bKey
 }
 
+// keyBadgerGet 用于生成存储键的键
 func keyBadgerGet(bType, bKey []byte) []byte {
 	bKey = append(bType, bKey...)
 	return bKey

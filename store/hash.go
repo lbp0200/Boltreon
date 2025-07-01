@@ -12,7 +12,7 @@ import (
 // 哈希操作
 //func (s *BadgerStore) HSet(key, field string, value interface{}) error {
 //	logFuncTag := "BadgerStoreHSet"
-//	baggerTypeKey := TypeKeyGet(key)
+//	baggerTypeKey := TypeOfKeyGet(key)
 //	bValue, err := helper.InterfaceToBytes(value)
 //	if err != nil {
 //		return fmt.Errorf("%s,%v", logFuncTag, err)

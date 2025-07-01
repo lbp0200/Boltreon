@@ -9,7 +9,7 @@ import (
 func (s *BadgerStore) Del(key string) error {
 	// TODO 需要完善，多个key，返回删除的数量
 	bKey := []byte(key)
-	bTypeKey := TypeKeyGet(key)
+	bTypeKey := TypeOfKeyGet(key)
 	return s.db.Update(func(txn *badger.Txn) error {
 		item, err := txn.Get(bTypeKey)
 		if err != nil {
@@ -45,8 +45,8 @@ func (s *BadgerStore) Del(key string) error {
 func (s *BadgerStore) DelString(key string) error {
 	logFuncTag := "BadgerStoreDelString"
 	bKey := []byte(key)
-	badgerTypeKey := TypeKeyGet(key)
-	badgerValueKey := keyBadgerGet(prefixKeyString, bKey)
+	badgerTypeKey := TypeOfKeyGet(key)
+	badgerValueKey := keyBadgerGet(prefixKeyStringBytes, bKey)
 	return s.db.Update(func(txn *badger.Txn) error {
 		errDel := txn.Delete(badgerTypeKey)
 		if errDel != nil {
