@@ -2,6 +2,7 @@ package server
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"net"
 	"strconv"
@@ -34,7 +35,7 @@ func (h *Handler) handleConnection(conn net.Conn) {
 	for {
 		req, err := proto.ReadRESP(reader)
 		if err != nil {
-			fmt.Fprintln(conn, proto.Error("ERR connection closed"))
+			fmt.Fprintln(conn, proto.NewError("ERR connection closed"))
 			return
 		}
 		resp := h.executeCommand(req.Args)
@@ -46,15 +47,15 @@ func (h *Handler) handleConnection(conn net.Conn) {
 
 func (h *Handler) executeCommand(args [][]byte) proto.RESP {
 	if len(args) == 0 {
-		return proto.Error("ERR no command")
+		return proto.NewError("ERR no command")
 	}
 	cmd := strings.ToUpper(string(args[0]))
 	switch cmd {
 	case "PING":
-		return proto.NewSimpleString("OK")
+		return proto.OK
 	case "SET":
 		if len(args) < 3 {
-			return proto.Error("ERR wrong number of arguments for 'SET' command")
+			return proto.NewError("ERR wrong number of arguments for 'SET' command")
 		}
 		key, value := args[1], args[2]
 		ttl := time.Duration(0)
@@ -74,24 +75,24 @@ func (h *Handler) executeCommand(args [][]byte) proto.RESP {
 			}
 		}
 		if err := h.Db.SetWithTTL(key, value, ttl); err != nil {
-			return proto.Error(fmt.Sprintf("ERR %v", err))
+			return proto.NewError(fmt.Sprintf("ERR %v", err))
 		}
-		return proto.SimpleString("OK")
+		return proto.OK
 	case "GET":
 		if len(args) != 2 {
-			return proto.Error("ERR wrong number of arguments for 'GET' command")
+			return proto.NewError("ERR wrong number of arguments for 'GET' command")
 		}
 		val, err := h.Db.Get(args[1])
-		if err == badger.ErrKeyNotFound {
-			return proto.BulkString(nil)
+		if errors.Is(err, badger.ErrKeyNotFound) {
+			return proto.NewBulkString(nil)
 		}
 		if err != nil {
-			return proto.Error(fmt.Sprintf("ERR %v", err))
+			return proto.NewError(fmt.Sprintf("ERR %v", err))
 		}
-		return proto.BulkString(val)
+		return proto.NewBulkString(val)
 	case "DEL":
 		if len(args) < 2 {
-			return proto.Error("ERR wrong number of arguments for 'DEL' command")
+			return proto.NewError("ERR wrong number of arguments for 'DEL' command")
 		}
 		cnt := 0
 		for i := 1; i < len(args); i++ {
@@ -102,7 +103,7 @@ func (h *Handler) executeCommand(args [][]byte) proto.RESP {
 		return proto.Integer(int64(cnt))
 	case "EXISTS":
 		if len(args) < 2 {
-			return proto.Error("ERR wrong number of arguments for 'EXISTS' command")
+			return proto.NewError("ERR wrong number of arguments for 'EXISTS' command")
 		}
 		cnt := 0
 		for i := 1; i < len(args); i++ {
@@ -112,6 +113,6 @@ func (h *Handler) executeCommand(args [][]byte) proto.RESP {
 		}
 		return proto.Integer(int64(cnt))
 	default:
-		return proto.Error(fmt.Sprintf("ERR unknown command '%s'", cmd))
+		return proto.NewError(fmt.Sprintf("ERR unknown command '%s'", cmd))
 	}
 }

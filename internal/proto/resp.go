@@ -118,3 +118,7 @@ func NewSimpleString(s string) RESP { r := SimpleString(s); return &r }
 func NewBulkString(b []byte) RESP   { r := BulkString(b); return &r }
 func NewError(e string) RESP        { r := Error(e); return &r }
 func NewInteger(i int64) RESP       { r := Integer(i); return &r }
+
+var (
+	OK = NewSimpleString("OK")
+)
