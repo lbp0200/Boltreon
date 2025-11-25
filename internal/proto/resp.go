@@ -48,19 +48,55 @@ func ReadRESP(r *bufio.Reader) (*Array, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	// 调试：打印干净的行
+	fmt.Printf("Read line: %q (bytes: %v)\n", line, line)
+
+	if len(line) == 0 {
+		return nil, fmt.Errorf("empty line")
+	}
+
 	switch line[0] {
-	case '*':
-		n, _ := strconv.Atoi(string(line[1:]))
+	case '*': // Array
+		if len(line) == 1 {
+			return nil, fmt.Errorf("invalid array prefix")
+		}
+		n, err := strconv.Atoi(string(line[1:]))
+		if err != nil || n < 0 {
+			return nil, fmt.Errorf("invalid array length: %s", line[1:])
+		}
 		args := make([][]byte, n)
 		for i := 0; i < n; i++ {
-			args[i], err = readBulkString(r)
+			// 先读 $xxx\r\n
+			lenLine, err := readLine(r)
 			if err != nil {
 				return nil, err
 			}
+			fmt.Printf("Bulk length line: %q\n", lenLine)
+			if len(lenLine) == 0 || lenLine[0] != '$' {
+				return nil, fmt.Errorf("expected $, got %q", lenLine)
+			}
+			bulkLen, err := strconv.Atoi(string(lenLine[1:]))
+			if err != nil || bulkLen < -1 {
+				return nil, err
+			}
+			if bulkLen == -1 {
+				args[i] = nil
+				continue
+			}
+
+			// 读真实数据 + \r\n
+			data := make([]byte, bulkLen+2) // +2 for \r\n
+			_, err = io.ReadFull(r, data)
+			if err != nil {
+				return nil, err
+			}
+			args[i] = data[:bulkLen] // 去掉 \r\n
+			fmt.Printf("Bulk data: %q\n", args[i])
 		}
 		return &Array{Args: args}, nil
 	}
-	return nil, fmt.Errorf("unsupported RESP type: %s", line)
+	return nil, fmt.Errorf("unsupported RESP type: %c", line[0])
 }
 
 func WriteRESP(w io.Writer, resp RESP) error {
@@ -73,6 +109,10 @@ func readLine(r *bufio.Reader) ([]byte, error) {
 	line, err := r.ReadBytes('\n')
 	if err != nil {
 		return nil, err
+	}
+	// 去掉 \r\n
+	if len(line) > 0 && line[len(line)-1] == '\n' {
+		line = line[:len(line)-1]
 	}
 	if len(line) > 0 && line[len(line)-1] == '\r' {
 		line = line[:len(line)-1]
