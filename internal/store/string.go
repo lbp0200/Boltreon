@@ -9,12 +9,12 @@ import (
 )
 
 // stringKey 方法用于生成存储在 Badger 数据库中的键
-func (s *BadgerStore) stringKey(key []byte) []byte {
+func (s *BoltreonStore) stringKey(key []byte) []byte {
 	return []byte(fmt.Sprintf("%s:%s", KeyTypeString, string(key)))
 }
 
 // Set 实现 Redis SET 命令
-func (s *BadgerStore) Set(key []byte, value []byte) error {
+func (s *BoltreonStore) Set(key []byte, value []byte) error {
 	return s.db.Update(func(txn *badger.Txn) error {
 		strKey := s.stringKey(key)
 		return txn.Set(strKey, value)
@@ -22,7 +22,7 @@ func (s *BadgerStore) Set(key []byte, value []byte) error {
 }
 
 // SetWithTTL 字符串操作
-func (s *BadgerStore) SetWithTTL(key, value []byte, ttl time.Duration) error {
+func (s *BoltreonStore) SetWithTTL(key, value []byte, ttl time.Duration) error {
 	return s.db.Update(func(txn *badger.Txn) error {
 		e := badger.NewEntry(key, value).WithTTL(ttl)
 		return txn.SetEntry(e)
@@ -30,7 +30,7 @@ func (s *BadgerStore) SetWithTTL(key, value []byte, ttl time.Duration) error {
 }
 
 // Get 实现 Redis GET 命令
-func (s *BadgerStore) Get(key []byte) ([]byte, error) {
+func (s *BoltreonStore) Get(key []byte) ([]byte, error) {
 	var val []byte
 	err := s.db.View(func(txn *badger.Txn) error {
 		strKey := s.stringKey(key)

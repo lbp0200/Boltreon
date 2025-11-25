@@ -1,21 +1,21 @@
 package store
 
 import (
-	"PumbaaDB/helper"
 	"errors"
 	"github.com/dgraph-io/badger/v4"
+	"github.com/lbp0200/Boltreon/internal/helper"
 	"strings"
 )
 
 // setKey 方法用于生成存储在 Badger 数据库中的键
-func (s *BadgerStore) setKey(key []byte, parts ...string) []byte {
+func (s *BoltreonStore) setKey(key []byte, parts ...string) []byte {
 	base := []string{"SET", string(key)}
 	base = append(base, parts...)
 	return []byte(strings.Join(base, ":"))
 }
 
 // SAdd 实现 Redis SADD 命令
-func (s *BadgerStore) SAdd(key []byte, members ...[]byte) (int, error) {
+func (s *BoltreonStore) SAdd(key []byte, members ...[]byte) (int, error) {
 	added := 0
 	err := s.db.Update(func(txn *badger.Txn) error {
 		countKey := s.setKey(key, "count")
@@ -56,7 +56,7 @@ func (s *BadgerStore) SAdd(key []byte, members ...[]byte) (int, error) {
 }
 
 // SRem 实现 Redis SREM 命令
-func (s *BadgerStore) SRem(key []byte, members ...[]byte) (int, error) {
+func (s *BoltreonStore) SRem(key []byte, members ...[]byte) (int, error) {
 	removed := 0
 	err := s.db.Update(func(txn *badger.Txn) error {
 		countKey := s.setKey(key, "count")
@@ -90,7 +90,7 @@ func (s *BadgerStore) SRem(key []byte, members ...[]byte) (int, error) {
 }
 
 // SCard 实现 Redis SCARD 命令
-func (s *BadgerStore) SCard(key []byte) (uint64, error) {
+func (s *BoltreonStore) SCard(key []byte) (uint64, error) {
 	var count uint64
 	err := s.db.View(func(txn *badger.Txn) error {
 		countKey := s.setKey(key, "count")
@@ -109,7 +109,7 @@ func (s *BadgerStore) SCard(key []byte) (uint64, error) {
 }
 
 // SIsMember 实现 Redis SISMEMBER 命令
-func (s *BadgerStore) SIsMember(key []byte, member []byte) (bool, error) {
+func (s *BoltreonStore) SIsMember(key []byte, member []byte) (bool, error) {
 	exists := false
 	err := s.db.View(func(txn *badger.Txn) error {
 		memberKey := s.setKey(key, "member", string(member))

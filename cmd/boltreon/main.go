@@ -1,36 +1,33 @@
 package main
 
 import (
-	"fmt"
+	"flag"
+	"github.com/lbp0200/Boltreon/internal/server"
+	"log"
 	"net"
+	"os"
 
-	"github.com/lbp0200/Boltreon/helper"
-	"github.com/lbp0200/Boltreon/resp"
-	"github.com/lbp0200/Boltreon/store"
+	"github.com/lbp0200/Boltreon/internal/store"
 )
 
 func main() {
-	store, err := store.NewBadgerStore("./data")
-	if err != nil {
-		panic(err)
-	}
-	defer store.Close()
+	addr := flag.String("addr", ":6379", "listen addr")
+	dbPath := flag.String("dir", os.TempDir(), "badger dir")
+	flag.Parse()
 
-	listener, err := net.Listen("tcp", ":7701")
+	db, err := store.NewBoltreonStore(*dbPath)
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
-	defer listener.Close()
+	defer db.Close()
 
-	fmt.Println("Redis server listening on :7701")
-	for {
-		conn, err := listener.Accept()
-		if err != nil {
-			fmt.Println("Error accepting connection:", err)
-			continue
-		}
-		helper.ProtectGoroutine(func() {
-			resp.HandleConnection(conn, store)
-		})
+	handler := &server.Handler{Db: db}
+	ln, err := net.Listen("tcp", *addr)
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("Boltreon listening on %s", *addr)
+	if err := handler.ServeTCP(ln); err != nil {
+		log.Fatal(err)
 	}
 }

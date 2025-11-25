@@ -1,8 +1,8 @@
 package store
 
 import (
-	"PumbaaDB/helper"
 	"fmt"
+	"github.com/lbp0200/Boltreon/internal/helper"
 	"strings"
 
 	"github.com/dgraph-io/badger/v4"
@@ -25,14 +25,14 @@ type ListNode struct {
 // key 是链表的主键，以字节切片形式传入
 // parts 是可变参数，用于拼接更多的键信息
 // 返回一个字节切片，作为存储在数据库中的完整键
-func (s *BadgerStore) listKey(key []byte, parts ...string) []byte {
+func (s *BoltreonStore) listKey(key []byte, parts ...string) []byte {
 	return []byte(fmt.Sprintf("%s:%s:%s", KeyTypeList, key, strings.Join(parts, ":")))
 }
 
 // listLength 方法用于获取链表的长度
 // key 是链表的主键，以字节切片形式传入
 // 返回链表的长度（无符号 64 位整数）和可能出现的错误
-func (s *BadgerStore) listLength(key []byte) (uint64, error) {
+func (s *BoltreonStore) listLength(key []byte) (uint64, error) {
 	var length uint64
 	errView := s.db.View(func(txn *badger.Txn) error {
 		// 获取长度
@@ -51,7 +51,7 @@ func (s *BadgerStore) listLength(key []byte) (uint64, error) {
 }
 
 // store/badger_store.go
-func (s *BadgerStore) listCreate(key []byte) error {
+func (s *BoltreonStore) listCreate(key []byte) error {
 	return s.db.Update(func(txn *badger.Txn) error {
 		// 初始化链表元数据
 		lengthKey := s.listKey(key, "length")
@@ -67,7 +67,7 @@ func (s *BadgerStore) listCreate(key []byte) error {
 	})
 }
 
-func (s *BadgerStore) listGetMeta(keyRedis []byte) (length uint64, start, end string, err error) {
+func (s *BoltreonStore) listGetMeta(keyRedis []byte) (length uint64, start, end string, err error) {
 	err = s.db.View(func(txn *badger.Txn) error {
 		// 获取长度
 		lengthItem, errGet := txn.Get(s.listKey(keyRedis, "length"))
@@ -98,7 +98,7 @@ func (s *BadgerStore) listGetMeta(keyRedis []byte) (length uint64, start, end st
 	return
 }
 
-func (s *BadgerStore) listUpdateMeta(txn *badger.Txn, key []byte, length uint64, start, end string) error {
+func (s *BoltreonStore) listUpdateMeta(txn *badger.Txn, key []byte, length uint64, start, end string) error {
 	// 更新长度
 	if err := txn.Set(s.listKey(key, "length"), helper.Uint64ToBytes(length)); err != nil {
 		return err
@@ -111,7 +111,7 @@ func (s *BadgerStore) listUpdateMeta(txn *badger.Txn, key []byte, length uint64,
 	return txn.Set(s.listKey(key, "end"), []byte(end))
 }
 
-func (s *BadgerStore) createNode(txn *badger.Txn, key []byte, value []byte) (string, error) {
+func (s *BoltreonStore) createNode(txn *badger.Txn, key []byte, value []byte) (string, error) {
 	nodeID := uuid.New().String()
 	nodeKey := s.listKey(key, nodeID)
 	if err := txn.Set(nodeKey, value); err != nil {
@@ -120,7 +120,7 @@ func (s *BadgerStore) createNode(txn *badger.Txn, key []byte, value []byte) (str
 	return nodeID, nil
 }
 
-func (s *BadgerStore) linkNodes(txn *badger.Txn, key []byte, prevID, nextID string) error {
+func (s *BoltreonStore) linkNodes(txn *badger.Txn, key []byte, prevID, nextID string) error {
 	// 更新前节点的next指针
 	if prevID != "" {
 		prevNextKey := s.listKey(key, prevID, "next")
@@ -137,7 +137,7 @@ func (s *BadgerStore) linkNodes(txn *badger.Txn, key []byte, prevID, nextID stri
 }
 
 // LPush Redis LPUSH 实现
-func (s *BadgerStore) LPush(key []byte, values ...[]byte) (isSuccess int, err error) {
+func (s *BoltreonStore) LPush(key []byte, values ...[]byte) (isSuccess int, err error) {
 	err = s.db.Update(func(txn *badger.Txn) error {
 		length, start, end, _ := s.listGetMeta(key)
 		for _, value := range values {
@@ -180,7 +180,7 @@ func (s *BadgerStore) LPush(key []byte, values ...[]byte) (isSuccess int, err er
 }
 
 // RPOP 实现
-func (s *BadgerStore) RPop(key []byte) ([]byte, error) {
+func (s *BoltreonStore) RPop(key []byte) ([]byte, error) {
 	var value []byte
 	err := s.db.Update(func(txn *badger.Txn) error {
 		length, start, end, err := s.listGetMeta(key)
@@ -231,7 +231,7 @@ func (s *BadgerStore) RPop(key []byte) ([]byte, error) {
 }
 
 // LLEN 实现
-func (s *BadgerStore) LLen(key []byte) (uint64, error) {
+func (s *BoltreonStore) LLen(key []byte) (uint64, error) {
 	length, err := s.listLength(key)
 	return length, err
 }

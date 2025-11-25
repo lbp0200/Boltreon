@@ -1,17 +1,17 @@
 package store
 
 import (
-	"PumbaaDB/helper"
 	"errors"
 	"fmt"
+	"github.com/lbp0200/Boltreon/internal/helper"
 	"strings"
 
 	"github.com/dgraph-io/badger/v4"
 )
 
 // 哈希操作
-//func (s *BadgerStore) HSet(key, field string, value interface{}) error {
-//	logFuncTag := "BadgerStoreHSet"
+//func (s *BoltreonStore) HSet(key, field string, value interface{}) error {
+//	logFuncTag := "BoltreonStoreHSet"
 //	baggerTypeKey := TypeOfKeyGet(key)
 //	bValue, err := helper.InterfaceToBytes(value)
 //	if err != nil {
@@ -28,8 +28,8 @@ import (
 //}
 
 // 修改 HSet 维护计数器
-func (s *BadgerStore) HSet(key, field string, value interface{}) error {
-	logFuncTag := "BadgerStoreHSet"
+func (s *BoltreonStore) HSet(key, field string, value interface{}) error {
+	logFuncTag := "BoltreonStoreHSet"
 	bValue, err := helper.InterfaceToBytes(value)
 	if err != nil {
 		return fmt.Errorf("%s,%v", logFuncTag, err)
@@ -68,7 +68,7 @@ func (s *BadgerStore) HSet(key, field string, value interface{}) error {
 		return txn.Set(countKey, helper.Uint64ToBytes(currentCount))
 	})
 }
-func (s *BadgerStore) HGet(key, field string) ([]byte, error) {
+func (s *BoltreonStore) HGet(key, field string) ([]byte, error) {
 	hkey := s.hashKey(key, field)
 	var val []byte
 	err := s.db.View(func(txn *badger.Txn) error {
@@ -82,17 +82,17 @@ func (s *BadgerStore) HGet(key, field string) ([]byte, error) {
 	return val, err
 }
 
-func (s *BadgerStore) hashKey(key, field string) []byte {
+func (s *BoltreonStore) hashKey(key, field string) []byte {
 	return []byte(fmt.Sprintf("%s:%s:%s", KeyTypeHash, key, field))
 }
 
 // hashCountKey 方法用于生成哈希表计数器键
-func (s *BadgerStore) hashCountKey(key string) []byte {
+func (s *BoltreonStore) hashCountKey(key string) []byte {
 	return []byte(fmt.Sprintf("%s:%s:count", KeyTypeHash, key))
 }
 
 // HDel 实现 Redis HDEL 命令
-func (s *BadgerStore) HDel(key string, fields ...string) (int, error) {
+func (s *BoltreonStore) HDel(key string, fields ...string) (int, error) {
 	deletedCount := 0
 	return 1, s.db.Update(func(txn *badger.Txn) error {
 		countKey := s.hashCountKey(key)
@@ -129,7 +129,7 @@ func (s *BadgerStore) HDel(key string, fields ...string) (int, error) {
 }
 
 // HLen 实现 Redis HLEN 命令
-func (s *BadgerStore) HLen(key string) (uint64, error) {
+func (s *BoltreonStore) HLen(key string) (uint64, error) {
 	var count uint64
 	err := s.db.View(func(txn *badger.Txn) error {
 		countKey := s.hashCountKey(key)
@@ -151,7 +151,7 @@ func (s *BadgerStore) HLen(key string) (uint64, error) {
 }
 
 // HGetAll 实现 Redis HGETALL 命令
-func (s *BadgerStore) HGetAll(key string) (map[string][]byte, error) {
+func (s *BoltreonStore) HGetAll(key string) (map[string][]byte, error) {
 	result := make(map[string][]byte)
 	prefix := fmt.Sprintf("%s:%s:", KeyTypeHash, key)
 	err := s.db.View(func(txn *badger.Txn) error {

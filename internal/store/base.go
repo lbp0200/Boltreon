@@ -6,7 +6,7 @@ import (
 	"github.com/dgraph-io/badger/v4"
 )
 
-func (s *BadgerStore) Del(key string) error {
+func (s *BoltreonStore) Del(key string) error {
 	// TODO 需要完善，多个key，返回删除的数量
 	bKey := []byte(key)
 	bTypeKey := TypeOfKeyGet(key)
@@ -42,8 +42,8 @@ func (s *BadgerStore) Del(key string) error {
 	})
 }
 
-func (s *BadgerStore) DelString(key string) error {
-	logFuncTag := "BadgerStoreDelString"
+func (s *BoltreonStore) DelString(key string) error {
+	logFuncTag := "BoltreonStoreDelString"
 	bKey := []byte(key)
 	badgerTypeKey := TypeOfKeyGet(key)
 	badgerValueKey := keyBadgerGet1(prefixKeyStringBytes, bKey)
