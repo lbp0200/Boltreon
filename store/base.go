@@ -46,7 +46,7 @@ func (s *BadgerStore) DelString(key string) error {
 	logFuncTag := "BadgerStoreDelString"
 	bKey := []byte(key)
 	badgerTypeKey := TypeOfKeyGet(key)
-	badgerValueKey := keyBadgerGet(prefixKeyStringBytes, bKey)
+	badgerValueKey := keyBadgerGet1(prefixKeyStringBytes, bKey)
 	return s.db.Update(func(txn *badger.Txn) error {
 		errDel := txn.Delete(badgerTypeKey)
 		if errDel != nil {

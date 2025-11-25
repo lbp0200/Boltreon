@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"net"
 
-	"PumbaaDB/helper"
-	"PumbaaDB/resp"
-	"PumbaaDB/store"
+	"github.com/lbp0200/Boltreon/helper"
+	"github.com/lbp0200/Boltreon/resp"
+	"github.com/lbp0200/Boltreon/store"
 )
 
 func main() {

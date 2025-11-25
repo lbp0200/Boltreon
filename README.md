@@ -1,9 +1,19 @@
-# PumbaaDB
+# Boltreon
 
-开发中
+A disk-persistent Redis-compatible database in Go, powered by Badger for storage. Supports clustering for high availability.
 
-一种数据直接存硬盘的Redis集群模式实现，灵感来自pika(https://github.com/OpenAtomFoundation/pika)和kvrocks(https://kvrocks.apache.org/)。
+## Features
+- **Full Redis Protocol**: Compatible with redis-cli, supports SET/GET/DEL + more.
+- **Disk-Backed**: Uses BadgerDB for durable, high-throughput KV storage (no memory limits!).
+- **Clustering**: Slot-based sharding, node discovery (WIP).
+- **Go Native**: High perf, low deps.
 
-和kvrocks思路一致，只是用golang重复造了一个轮子。不同的地方在于纯golang实现，底层数据存储使用badger(https://github.com/dgraph-io/badger)，没有使用rocksDB。
-
-Redis数据结构到KV数据结构的映射，由DeepSeek协助实现。
+## Quick Start
+```bash
+git clone https://github.com/lbp0200/Boltreon
+cd Boltreon
+go mod tidy
+go run cmd/boltreon/main.go -dir=./data
+# In another terminal:
+redis-cli -p 6379 SET hello "world from disk!"
+redis-cli -p 6379 GET hello

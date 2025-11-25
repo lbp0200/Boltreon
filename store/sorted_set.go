@@ -4,9 +4,18 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+	"log"
 	"math"
 
 	"github.com/dgraph-io/badger/v4"
+)
+
+const (
+	prefixKeySortedSetBytes = "zset:"
+	sortedSetIndex          = ":index:"
+	sortedSetData           = ":data:"
+	UnderScore              = "_"
+	KeyTypeSortedSet        = "zset"
 )
 
 // ZSetMember 定义排序集成员结构体
@@ -25,11 +34,9 @@ type ZSetsMetaValue struct {
 func encodeScore(score float64) []byte {
 	bits := math.Float64bits(score)
 	b := make([]byte, 8)
-	// 翻转符号位以确保负分数排在正分数前
 	if score >= 0 {
 		bits = bits ^ 0x8000000000000000
 	} else {
-		// 负分数翻转所有位以保持绝对值排序
 		bits = ^bits
 	}
 	binary.BigEndian.PutUint64(b, bits)
@@ -66,13 +73,13 @@ func decodeMeta(b []byte) (ZSetsMetaValue, error) {
 }
 
 func sortedSetKeyMeta(zSetName string) []byte {
-	return keyBadgerGet(prefixKeySortedSetBytes, []byte(zSetName+"meta"))
+	return keyBadgerGet(prefixKeySortedSetBytes, []byte(zSetName+":meta"))
 }
 
 func sortedSetKeyIndex(zSetName string, score float64, member string, version uint32) []byte {
 	key := []byte(zSetName + sortedSetIndex)
 	key = append(key, encodeScore(score)...)
-	key = append(key, []byte(UnderScore+member)...)
+	key = append(key, []byte(":"+member+":")...)
 	key = append(key, encodeVersion(version)...)
 	return keyBadgerGet(prefixKeySortedSetBytes, key)
 }
@@ -87,14 +94,23 @@ func encodeVersion(version uint32) []byte {
 	return b
 }
 
+func keyBadgerGet(prefix string, key []byte) []byte {
+	return append([]byte(prefix), key...)
+}
+
+func TypeOfKeyGet(zSetName string) []byte {
+	return keyBadgerGet(prefixKeySortedSetBytes, []byte(zSetName+":type"))
+}
+
 // ZAdd 添加或更新成员分数
-func (s *BadgerStore) ZAdd(zSetName string, members []ZSetMember) error {
+func (s *BoltreonStore) ZAdd(zSetName string, members []ZSetMember) error {
 	if len(members) == 0 {
 		return nil
 	}
 	return s.db.Update(func(txn *badger.Txn) error {
 		badgerTypeKey := TypeOfKeyGet(zSetName)
 		if err := txn.Set(badgerTypeKey, []byte(KeyTypeSortedSet)); err != nil {
+			log.Printf("ZAdd: Failed to set type key: %v", err)
 			return err
 		}
 
@@ -108,9 +124,11 @@ func (s *BadgerStore) ZAdd(zSetName string, members []ZSetMember) error {
 				return err
 			})
 			if err != nil {
+				log.Printf("ZAdd: Failed to decode meta: %v", err)
 				return err
 			}
 		} else if !errors.Is(err, badger.ErrKeyNotFound) {
+			log.Printf("ZAdd: Failed to get meta: %v", err)
 			return err
 		}
 		newMembers := int64(len(members))
@@ -140,11 +158,13 @@ func (s *BadgerStore) ZAdd(zSetName string, members []ZSetMember) error {
 					return nil
 				})
 				if err != nil {
+					log.Printf("ZAdd: Failed to get old score for %s: %v", member, err)
 					return err
 				}
 				oldScore = decodeScore(oldScoreBytes)
 				newMembers-- // 替换现有成员，计数不变
 			} else if !errors.Is(err, badger.ErrKeyNotFound) {
+				log.Printf("ZAdd: Failed to check member %s: %v", member, err)
 				return err
 			}
 
@@ -163,6 +183,7 @@ func (s *BadgerStore) ZAdd(zSetName string, members []ZSetMember) error {
 		// 更新元数据计数
 		meta.Card += newMembers
 		if err := txn.Set(metaKey, encodeMeta(meta)); err != nil {
+			log.Printf("ZAdd: Failed to set meta: %v", err)
 			return err
 		}
 
@@ -170,27 +191,31 @@ func (s *BadgerStore) ZAdd(zSetName string, members []ZSetMember) error {
 		for _, op := range ops {
 			if op.oldIndexKey != nil {
 				if err := txn.Delete(op.oldIndexKey); err != nil {
+					log.Printf("ZAdd: Failed to delete old index: %v", err)
 					return err
 				}
 			}
 			if err := txn.Set(op.dataKey, op.score); err != nil {
+				log.Printf("ZAdd: Failed to set data key: %v", err)
 				return err
 			}
 			if err := txn.Set(op.indexKey, nil); err != nil {
+				log.Printf("ZAdd: Failed to set index key: %v", err)
 				return err
 			}
 		}
 
+		log.Printf("ZAdd: Successfully added %d members to %s, new card: %d", len(members), zSetName, meta.Card)
 		return nil
 	})
 }
 
 // ZRangeByScore 获取分数范围内的成员
-func (s *BadgerStore) ZRangeByScore(zSetName string, minScore, maxScore float64, offset, count int) ([]ZSetMember, error) {
+func (s *BoltreonStore) ZRangeByScore(zSetName string, minScore, maxScore float64, offset, count int) ([]ZSetMember, error) {
 	var results []ZSetMember
 	err := s.db.View(func(txn *badger.Txn) error {
 		opts := badger.DefaultIteratorOptions
-		prefix := []byte(zSetName + sortedSetIndex)
+		prefix := keyBadgerGet(prefixKeySortedSetBytes, []byte(zSetName+sortedSetIndex)) // e.g., "zset:myset:index:"
 		opts.Prefix = prefix
 		opts.PrefetchValues = false
 
@@ -203,12 +228,17 @@ func (s *BadgerStore) ZRangeByScore(zSetName string, minScore, maxScore float64,
 			item := it.Item()
 			key := item.Key()
 
-			parts := bytes.Split(key, []byte(UnderScore))
-			if len(parts) < 4 {
+			keyParts := bytes.Split(key[len(prefixKeySortedSetBytes):], []byte(":"))
+			if len(keyParts) != 5 {
+				log.Printf("ZRangeByScore: Invalid key format: %s", key)
 				continue
 			}
-			member := string(parts[3])
-			scoreBytes := key[len(prefix) : len(key)-len(UnderScore+member)-4]
+			scoreBytes := keyParts[2]
+			member := string(keyParts[3])
+			if len(scoreBytes) != 8 {
+				log.Printf("ZRangeByScore: Invalid score bytes length: %d", len(scoreBytes))
+				continue
+			}
 			score := decodeScore(scoreBytes)
 
 			if score > maxScore {
@@ -224,13 +254,14 @@ func (s *BadgerStore) ZRangeByScore(zSetName string, minScore, maxScore float64,
 
 			results = append(results, ZSetMember{Member: member, Score: score})
 		}
+		log.Printf("ZRangeByScore: Retrieved %d members from %s", len(results), zSetName)
 		return nil
 	})
 	return results, err
 }
 
 // ZRem 删除成员
-func (s *BadgerStore) ZRem(zSetName, member string) error {
+func (s *BoltreonStore) ZRem(zSetName, member string) error {
 	return s.db.Update(func(txn *badger.Txn) error {
 		dataKey := sortedSetKeyMember(zSetName, member)
 		item, err := txn.Get(dataKey)
@@ -238,6 +269,7 @@ func (s *BadgerStore) ZRem(zSetName, member string) error {
 			return nil
 		}
 		if err != nil {
+			log.Printf("ZRem: Failed to get data key %s: %v", dataKey, err)
 			return err
 		}
 
@@ -251,9 +283,11 @@ func (s *BadgerStore) ZRem(zSetName, member string) error {
 				return err
 			})
 			if err != nil {
+				log.Printf("ZRem: Failed to decode meta: %v", err)
 				return err
 			}
 		} else if !errors.Is(err, badger.ErrKeyNotFound) {
+			log.Printf("ZRem: Failed to get meta: %v", err)
 			return err
 		}
 
@@ -263,30 +297,44 @@ func (s *BadgerStore) ZRem(zSetName, member string) error {
 			return nil
 		})
 		if err != nil {
+			log.Printf("ZRem: Failed to get score for %s: %v", member, err)
 			return err
 		}
 		score := decodeScore(scoreBytes)
 
 		if err := txn.Delete(dataKey); err != nil {
+			log.Printf("ZRem: Failed to delete data key: %v", err)
 			return err
 		}
 
 		indexKey := sortedSetKeyIndex(zSetName, score, member, meta.Version)
 		if err := txn.Delete(indexKey); err != nil {
+			log.Printf("ZRem: Failed to delete index key: %v", err)
 			return err
 		}
 
 		// 更新元数据
 		meta.Card--
 		if meta.Card <= 0 {
-			return txn.Delete(metaKey)
+			if err := txn.Delete(metaKey); err != nil {
+				log.Printf("ZRem: Failed to delete meta: %v", err)
+				return err
+			}
+			log.Printf("ZRem: Deleted %s from %s, set empty", member, zSetName)
+			return nil
 		}
-		return txn.Set(metaKey, encodeMeta(meta))
+		if err := txn.Set(metaKey, encodeMeta(meta)); err != nil {
+			log.Printf("ZRem: Failed to set meta: %v", err)
+			return err
+		}
+
+		log.Printf("ZRem: Successfully removed %s from %s, new card: %d", member, zSetName, meta.Card)
+		return nil
 	})
 }
 
 // ZScore 获取成员分数
-func (s *BadgerStore) ZScore(zSetName, member string) (float64, bool, error) {
+func (s *BoltreonStore) ZScore(zSetName, member string) (float64, bool, error) {
 	var score float64
 	dataKey := sortedSetKeyMember(zSetName, member)
 
@@ -304,15 +352,20 @@ func (s *BadgerStore) ZScore(zSetName, member string) (float64, bool, error) {
 	if errors.Is(err, badger.ErrKeyNotFound) {
 		return 0, false, nil
 	}
+	if err != nil {
+		log.Printf("ZScore: Failed to get score for %s: %v", member, err)
+	}
 	return score, true, err
 }
 
 // ZRange 获取指定排名范围的成员
-func (s *BadgerStore) ZRange(zSetName string, start, stop int64) ([]*ZSetMember, error) {
+func (s *BoltreonStore) ZRange(zSetName string, start, stop int64) ([]*ZSetMember, error) {
 	var results []*ZSetMember
 	err := s.db.View(func(txn *badger.Txn) error {
 		opts := badger.DefaultIteratorOptions
-		prefix := []byte(zSetName + sortedSetIndex)
+		//prefix := []byte(zSetName + sortedSetIndex) // e.g., "myset:index:"
+		//opts.Prefix = prefix
+		prefix := keyBadgerGet(prefixKeySortedSetBytes, []byte(zSetName+sortedSetIndex)) // e.g., "zset:myset:index:"
 		opts.Prefix = prefix
 		opts.PrefetchValues = false
 
@@ -327,10 +380,12 @@ func (s *BadgerStore) ZRange(zSetName string, start, stop int64) ([]*ZSetMember,
 				return err
 			})
 			if err != nil {
+				log.Printf("ZRange: Failed to decode meta: %v", err)
 				return err
 			}
 			totalCount = meta.Card
 		} else if !errors.Is(err, badger.ErrKeyNotFound) {
+			log.Printf("ZRange: Failed to get meta: %v", err)
 			return err
 		}
 
@@ -347,7 +402,7 @@ func (s *BadgerStore) ZRange(zSetName string, start, stop int64) ([]*ZSetMember,
 		if stop >= totalCount {
 			stop = totalCount - 1
 		}
-		if start > stop {
+		if start > stop || totalCount == 0 {
 			return nil
 		}
 
@@ -367,24 +422,30 @@ func (s *BadgerStore) ZRange(zSetName string, start, stop int64) ([]*ZSetMember,
 			item := it.Item()
 			key := item.Key()
 
-			parts := bytes.Split(key, []byte(UnderScore))
-			if len(parts) < 4 {
+			parts := bytes.Split(key[len(prefixKeySortedSetBytes):], []byte(UnderScore))
+			if len(parts) < 2 {
+				log.Printf("ZRange: Invalid key format: %s", key)
 				continue
 			}
-			member := string(parts[3])
-			scoreBytes := key[len(prefix) : len(key)-len(UnderScore+member)-4]
+			member := string(parts[1][:len(parts[1])-4]) // 去掉版本号
+			scoreBytes := key[len(prefixKeySortedSetBytes)+len(zSetName)+len(sortedSetIndex) : len(key)-len(UnderScore+member)-4]
+			if len(scoreBytes) != 8 {
+				log.Printf("ZRange: Invalid score bytes length: %d", len(scoreBytes))
+				continue
+			}
 			score := decodeScore(scoreBytes)
 
 			results = append(results, &ZSetMember{Member: member, Score: score})
 			currentIndex++
 		}
+		log.Printf("ZRange: Retrieved %d members from %s", len(results), zSetName)
 		return nil
 	})
 	return results, err
 }
 
 // ZSetDel 删除整个排序集
-func (s *BadgerStore) ZSetDel(zSetName string) error {
+func (s *BoltreonStore) ZSetDel(zSetName string) error {
 	return s.db.Update(func(txn *badger.Txn) error {
 		dataPrefix := []byte(zSetName + sortedSetData)
 		indexPrefix := []byte(zSetName + sortedSetIndex)
@@ -396,6 +457,7 @@ func (s *BadgerStore) ZSetDel(zSetName string) error {
 		defer it.Close()
 		for it.Rewind(); it.ValidForPrefix(dataPrefix); it.Next() {
 			if err := txn.Delete(it.Item().Key()); err != nil {
+				log.Printf("ZSetDel: Failed to delete data key: %v", err)
 				return err
 			}
 		}
@@ -405,11 +467,22 @@ func (s *BadgerStore) ZSetDel(zSetName string) error {
 		defer it.Close()
 		for it.Rewind(); it.ValidForPrefix(indexPrefix); it.Next() {
 			if err := txn.Delete(it.Item().Key()); err != nil {
+				log.Printf("ZSetDel: Failed to delete index key: %v", err)
 				return err
 			}
 		}
 
-		// 删除元数据
-		return txn.Delete(sortedSetKeyMeta(zSetName))
+		// 删除元数据和类型键
+		if err := txn.Delete(sortedSetKeyMeta(zSetName)); err != nil {
+			log.Printf("ZSetDel: Failed to delete meta: %v", err)
+			return err
+		}
+		if err := txn.Delete(TypeOfKeyGet(zSetName)); err != nil {
+			log.Printf("ZSetDel: Failed to delete type key: %v", err)
+			return err
+		}
+
+		log.Printf("ZSetDel: Successfully deleted set %s", zSetName)
+		return nil
 	})
 }
