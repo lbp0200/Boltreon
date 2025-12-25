@@ -1,43 +1,55 @@
 package store
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/dgraph-io/badger/v4"
 )
 
 func (s *BoltreonStore) Del(key string) error {
-	// TODO 需要完善，多个key，返回删除的数量
-	bKey := []byte(key)
-	bTypeKey := TypeOfKeyGet(key)
+	typeKey := TypeOfKeyGet(key)
 	return s.db.Update(func(txn *badger.Txn) error {
-		item, err := txn.Get(bTypeKey)
+		item, err := txn.Get(typeKey)
+		if errors.Is(err, badger.ErrKeyNotFound) {
+			return nil
+		}
 		if err != nil {
 			return err
 		}
-		valCopy, errValueCopy := item.ValueCopy(nil)
-		if errValueCopy != nil {
-			return errValueCopy
+		valCopy, err := item.ValueCopy(nil)
+		if err != nil {
+			return err
 		}
-		switch string(valCopy) {
+		keyType := string(valCopy)
+		switch keyType {
 		case KeyTypeString:
-			// 处理 type1 的删除逻辑
-			return s.DelString(key)
+			if err := txn.Delete(typeKey); err != nil {
+				return err
+			}
+			return txn.Delete(s.stringKey([]byte(key)))
 		case KeyTypeList:
-			// 处理 type2 的删除逻辑
-			return txn.Delete(bKey)
+			if err := deleteByPrefix(txn, []byte(fmt.Sprintf("%s:%s:", KeyTypeList, key))); err != nil {
+				return err
+			}
+			return txn.Delete(typeKey)
 		case KeyTypeHash:
-			// 处理 type3 的删除逻辑
-			return txn.Delete(bKey)
+			if err := deleteByPrefix(txn, []byte(fmt.Sprintf("%s:%s:", KeyTypeHash, key))); err != nil {
+				return err
+			}
+			return txn.Delete(typeKey)
 		case KeyTypeSet:
-			// 处理 type4 的删除逻辑
-			return txn.Delete(bKey)
+			if err := deleteByPrefix(txn, []byte(fmt.Sprintf("%s:%s:", KeyTypeSet, key))); err != nil {
+				return err
+			}
+			return txn.Delete(typeKey)
 		case KeyTypeSortedSet:
-			// 处理 type5 的删除逻辑
-			return txn.Delete(bKey)
+			if err := deleteByPrefix(txn, []byte(fmt.Sprintf("%s%s", prefixKeySortedSetBytes, key))); err != nil {
+				return err
+			}
+			return txn.Delete(typeKey)
 		default:
-			// 默认的删除逻辑
-			return txn.Delete(bKey)
+			return txn.Delete(typeKey)
 		}
 	})
 }
@@ -46,7 +58,7 @@ func (s *BoltreonStore) DelString(key string) error {
 	logFuncTag := "BoltreonStoreDelString"
 	bKey := []byte(key)
 	badgerTypeKey := TypeOfKeyGet(key)
-	badgerValueKey := keyBadgerGet1(prefixKeyStringBytes, bKey)
+	badgerValueKey := s.stringKey(bKey)
 	return s.db.Update(func(txn *badger.Txn) error {
 		errDel := txn.Delete(badgerTypeKey)
 		if errDel != nil {
@@ -58,4 +70,18 @@ func (s *BoltreonStore) DelString(key string) error {
 		}
 		return nil
 	})
+}
+
+func deleteByPrefix(txn *badger.Txn, prefix []byte) error {
+	opts := badger.DefaultIteratorOptions
+	opts.PrefetchValues = false
+	iter := txn.NewIterator(opts)
+	defer iter.Close()
+
+	for iter.Seek(prefix); iter.ValidForPrefix(prefix); iter.Next() {
+		if err := txn.Delete(iter.Item().KeyCopy(nil)); err != nil {
+			return err
+		}
+	}
+	return nil
 }

@@ -2,9 +2,10 @@ package store
 
 import (
 	"errors"
+	"strings"
+
 	"github.com/dgraph-io/badger/v4"
 	"github.com/lbp0200/Boltreon/internal/helper"
-	"strings"
 )
 
 // setKey 方法用于生成存储在 Badger 数据库中的键
@@ -18,6 +19,9 @@ func (s *BoltreonStore) setKey(key []byte, parts ...string) []byte {
 func (s *BoltreonStore) SAdd(key []byte, members ...[]byte) (int, error) {
 	added := 0
 	err := s.db.Update(func(txn *badger.Txn) error {
+		if err := txn.Set(TypeOfKeyGet(string(key)), []byte(KeyTypeSet)); err != nil {
+			return err
+		}
 		countKey := s.setKey(key, "count")
 		var count uint64
 

@@ -16,6 +16,9 @@ func (s *BoltreonStore) stringKey(key []byte) []byte {
 // Set 实现 Redis SET 命令
 func (s *BoltreonStore) Set(key []byte, value []byte) error {
 	return s.db.Update(func(txn *badger.Txn) error {
+		if err := txn.Set(TypeOfKeyGet(string(key)), []byte(KeyTypeString)); err != nil {
+			return err
+		}
 		strKey := s.stringKey(key)
 		return txn.Set(strKey, value)
 	})

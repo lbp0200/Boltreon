@@ -139,6 +139,9 @@ func (s *BoltreonStore) linkNodes(txn *badger.Txn, key []byte, prevID, nextID st
 // LPush Redis LPUSH 实现
 func (s *BoltreonStore) LPush(key []byte, values ...[]byte) (isSuccess int, err error) {
 	err = s.db.Update(func(txn *badger.Txn) error {
+		if err := txn.Set(TypeOfKeyGet(string(key)), []byte(KeyTypeList)); err != nil {
+			return err
+		}
 		length, start, end, _ := s.listGetMeta(key)
 		for _, value := range values {
 			// 创建新节点

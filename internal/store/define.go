@@ -43,7 +43,7 @@ func (s *BoltreonStore) Close() error {
 }
 
 // TypeOfKeyGet 用于生成存储类型的键
-func TypeOfKeyGet1(strKey string) []byte {
+func TypeOfKeyGet(strKey string) []byte {
 	bKey := []byte(strKey)
 	bKey = append(prefixKeyTypeBytes, bKey...)
 	return bKey

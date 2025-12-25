@@ -3,8 +3,9 @@ package store
 import (
 	"errors"
 	"fmt"
-	"github.com/lbp0200/Boltreon/internal/helper"
 	"strings"
+
+	"github.com/lbp0200/Boltreon/internal/helper"
 
 	"github.com/dgraph-io/badger/v4"
 )
@@ -35,7 +36,11 @@ func (s *BoltreonStore) HSet(key, field string, value interface{}) error {
 		return fmt.Errorf("%s,%v", logFuncTag, err)
 	}
 	hkey := s.hashKey(key, field)
+	typeKey := TypeOfKeyGet(key)
 	return s.db.Update(func(txn *badger.Txn) error {
+		if err := txn.Set(typeKey, []byte(KeyTypeHash)); err != nil {
+			return err
+		}
 		// 检查字段是否存在
 		exists := false
 		if _, err := txn.Get(hkey); err == nil {
@@ -94,7 +99,7 @@ func (s *BoltreonStore) hashCountKey(key string) []byte {
 // HDel 实现 Redis HDEL 命令
 func (s *BoltreonStore) HDel(key string, fields ...string) (int, error) {
 	deletedCount := 0
-	return 1, s.db.Update(func(txn *badger.Txn) error {
+	err := s.db.Update(func(txn *badger.Txn) error {
 		countKey := s.hashCountKey(key)
 		var currentCount uint64
 		countItem, err := txn.Get(countKey)
@@ -116,7 +121,9 @@ func (s *BoltreonStore) HDel(key string, fields ...string) (int, error) {
 					return err
 				}
 				deletedCount++
-				currentCount--
+				if currentCount > 0 {
+					currentCount--
+				}
 			}
 		}
 
@@ -126,6 +133,7 @@ func (s *BoltreonStore) HDel(key string, fields ...string) (int, error) {
 		}
 		return nil
 	})
+	return deletedCount, err
 }
 
 // HLen 实现 Redis HLEN 命令
@@ -166,6 +174,9 @@ func (s *BoltreonStore) HGetAll(key string) (map[string][]byte, error) {
 			}
 			// 提取字段名
 			_, field := splitHashKey(k)
+			if field == "count" {
+				continue
+			}
 			val, _ := iter.Item().ValueCopy(nil)
 			result[field] = val
 		}

@@ -98,10 +98,6 @@ func keyBadgerGet(prefix string, key []byte) []byte {
 	return append([]byte(prefix), key...)
 }
 
-func TypeOfKeyGet(zSetName string) []byte {
-	return keyBadgerGet(prefixKeySortedSetBytes, []byte(zSetName+":type"))
-}
-
 // ZAdd 添加或更新成员分数
 func (s *BoltreonStore) ZAdd(zSetName string, members []ZSetMember) error {
 	if len(members) == 0 {
