@@ -27,7 +27,7 @@ func (s *BoltreonStore) Del(key string) error {
 			if err := txn.Delete(typeKey); err != nil {
 				return err
 			}
-			return txn.Delete(s.stringKey([]byte(key)))
+			return txn.Delete([]byte(s.stringKey(key)))
 		case KeyTypeList:
 			if err := deleteByPrefix(txn, []byte(fmt.Sprintf("%s:%s:", KeyTypeList, key))); err != nil {
 				return err
@@ -58,13 +58,13 @@ func (s *BoltreonStore) DelString(key string) error {
 	logFuncTag := "BoltreonStoreDelString"
 	bKey := []byte(key)
 	badgerTypeKey := TypeOfKeyGet(key)
-	badgerValueKey := s.stringKey(bKey)
+	badgerValueKey := s.stringKey(string(bKey))
 	return s.db.Update(func(txn *badger.Txn) error {
 		errDel := txn.Delete(badgerTypeKey)
 		if errDel != nil {
 			return fmt.Errorf("%s,Del Badger Type Key:%v", logFuncTag, errDel)
 		}
-		errDel = txn.Delete(badgerValueKey)
+		errDel = txn.Delete([]byte(badgerValueKey))
 		if errDel != nil {
 			return fmt.Errorf("%s,Del Badger Value Key:%v", logFuncTag, errDel)
 		}
