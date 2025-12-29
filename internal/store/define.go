@@ -26,16 +26,26 @@ var (
 )
 
 type BoltreonStore struct {
-	db *badger.DB
+	db              *badger.DB
+	compressionType CompressionType
 }
 
+// NewBoltreonStore 创建新的BoltreonStore实例
 func NewBoltreonStore(path string) (*BoltreonStore, error) {
+	return NewBoltreonStoreWithCompression(path, CompressionLZ4)
+}
+
+// NewBoltreonStoreWithCompression 创建新的BoltreonStore实例，指定压缩算法
+func NewBoltreonStoreWithCompression(path string, compressionType CompressionType) (*BoltreonStore, error) {
 	opts := badger.DefaultOptions(path)
 	db, err := badger.Open(opts)
 	if err != nil {
 		return nil, err
 	}
-	return &BoltreonStore{db: db}, nil
+	return &BoltreonStore{
+		db:              db,
+		compressionType: compressionType,
+	}, nil
 }
 
 func (s *BoltreonStore) Close() error {

@@ -48,8 +48,8 @@ func (s *BoltreonStore) HSet(key, field string, value interface{}) error {
 			exists = true
 		}
 
-		// 写入字段值
-		if err := txn.Set(hkey, bValue); err != nil {
+		// 写入字段值（带压缩）
+		if err := s.setValueWithCompression(txn, hkey, bValue); err != nil {
 			return err
 		}
 
@@ -82,7 +82,7 @@ func (s *BoltreonStore) HGet(key, field string) ([]byte, error) {
 		if err != nil {
 			return err
 		}
-		val, err = item.ValueCopy(nil)
+		val, err = s.getValueWithDecompression(item)
 		return err
 	})
 	return val, err
@@ -178,7 +178,11 @@ func (s *BoltreonStore) HGetAll(key string) (map[string][]byte, error) {
 			if field == "count" {
 				continue
 			}
-			val, _ := iter.Item().ValueCopy(nil)
+			item := iter.Item()
+			val, err := s.getValueWithDecompression(item)
+			if err != nil {
+				return err
+			}
 			result[field] = val
 		}
 		return nil
@@ -264,7 +268,11 @@ func (s *BoltreonStore) HVals(key string) ([][]byte, error) {
 			if field == "count" {
 				continue
 			}
-			val, _ := iter.Item().ValueCopy(nil)
+			item := iter.Item()
+			val, err := s.getValueWithDecompression(item)
+			if err != nil {
+				return err
+			}
 			values = append(values, val)
 		}
 		return nil
@@ -305,8 +313,8 @@ func (s *BoltreonStore) HMSet(key string, fieldValues map[string]interface{}) er
 				exists = true
 			}
 
-			// 写入字段值
-			if err := txn.Set(hkey, bValue); err != nil {
+			// 写入字段值（带压缩）
+			if err := s.setValueWithCompression(txn, hkey, bValue); err != nil {
 				return err
 			}
 
@@ -368,11 +376,11 @@ func (s *BoltreonStore) HSetNX(key, field string, value interface{}) (bool, erro
 			return err
 		}
 
-		// 字段不存在，设置它
+		// 字段不存在，设置它（带压缩）
 		if err := txn.Set(typeKey, []byte(KeyTypeHash)); err != nil {
 			return err
 		}
-		if err := txn.Set(hkey, bValue); err != nil {
+		if err := s.setValueWithCompression(txn, hkey, bValue); err != nil {
 			return err
 		}
 
@@ -434,9 +442,9 @@ func (s *BoltreonStore) HIncrBy(key, field string, increment int64) (int64, erro
 		// 计算新值
 		result = currentValue + increment
 
-		// 保存新值（存储为字符串，与Redis一致）
+		// 保存新值（存储为字符串，与Redis一致，带压缩）
 		bValue := []byte(strconv.FormatInt(result, 10))
-		if err := txn.Set(hkey, bValue); err != nil {
+		if err := s.setValueWithCompression(txn, hkey, bValue); err != nil {
 			return err
 		}
 
@@ -499,9 +507,9 @@ func (s *BoltreonStore) HIncrByFloat(key, field string, increment float64) (floa
 		// 计算新值
 		result = currentValue + increment
 
-		// 保存新值（存储为字符串，与Redis一致）
+		// 保存新值（存储为字符串，与Redis一致，带压缩）
 		bValue := []byte(strconv.FormatFloat(result, 'f', -1, 64))
-		if err := txn.Set(hkey, bValue); err != nil {
+		if err := s.setValueWithCompression(txn, hkey, bValue); err != nil {
 			return err
 		}
 

@@ -22,7 +22,7 @@ func (s *BoltreonStore) Set(key string, value string) error {
 			return err
 		}
 		strKey := s.stringKey(key)
-		return txn.Set([]byte(strKey), []byte(value))
+		return s.setValueWithCompression(txn, []byte(strKey), []byte(value))
 	})
 }
 
@@ -33,8 +33,7 @@ func (s *BoltreonStore) SetWithTTL(key, value string, ttl time.Duration) error {
 			return err
 		}
 		strKey := s.stringKey(key)
-		e := badger.NewEntry([]byte(strKey), []byte(value)).WithTTL(ttl)
-		return txn.SetEntry(e)
+		return s.setEntryWithCompression(txn, []byte(strKey), []byte(value), ttl)
 	})
 }
 
@@ -65,7 +64,7 @@ func (s *BoltreonStore) SetNX(key string, value string) (bool, error) {
 		if err := txn.Set(TypeOfKeyGet(key), []byte(KeyTypeString)); err != nil {
 			return err
 		}
-		if err := txn.Set([]byte(strKey), []byte(value)); err != nil {
+		if err := s.setValueWithCompression(txn, []byte(strKey), []byte(value)); err != nil {
 			return err
 		}
 		success = true
@@ -81,8 +80,8 @@ func (s *BoltreonStore) GetSet(key string, value string) (string, error) {
 		strKey := s.stringKey(key)
 		item, err := txn.Get([]byte(strKey))
 		if err == nil {
-			// 键存在，获取旧值
-			val, err := item.ValueCopy(nil)
+			// 键存在，获取旧值（需要解压缩）
+			val, err := s.getValueWithDecompression(item)
 			if err != nil {
 				return err
 			}
@@ -90,11 +89,11 @@ func (s *BoltreonStore) GetSet(key string, value string) (string, error) {
 		} else if !errors.Is(err, badger.ErrKeyNotFound) {
 			return err
 		}
-		// 设置新值
+		// 设置新值（需要压缩）
 		if err := txn.Set(TypeOfKeyGet(key), []byte(KeyTypeString)); err != nil {
 			return err
 		}
-		return txn.Set([]byte(strKey), []byte(value))
+		return s.setValueWithCompression(txn, []byte(strKey), []byte(value))
 	})
 	return oldValue, err
 }
@@ -113,7 +112,7 @@ func (s *BoltreonStore) MGet(keys ...string) ([]string, error) {
 				}
 				return err
 			}
-			val, err := item.ValueCopy(nil)
+			val, err := s.getValueWithDecompression(item)
 			if err != nil {
 				return err
 			}
@@ -215,7 +214,7 @@ func (s *BoltreonStore) getIntValue(txn *badger.Txn, key string) (int64, error) 
 		}
 		return 0, err
 	}
-	val, err := item.ValueCopy(nil)
+	val, err := s.getValueWithDecompression(item)
 	if err != nil {
 		return 0, err
 	}
@@ -283,7 +282,7 @@ func (s *BoltreonStore) getFloatValue(txn *badger.Txn, key string) (float64, err
 		}
 		return 0, err
 	}
-	val, err := item.ValueCopy(nil)
+	val, err := s.getValueWithDecompression(item)
 	if err != nil {
 		return 0, err
 	}
@@ -301,7 +300,8 @@ func (s *BoltreonStore) setFloatValue(txn *badger.Txn, key string, value float64
 	}
 	strKey := s.stringKey(key)
 	// 使用科学计数法避免精度问题
-	return txn.Set([]byte(strKey), []byte(strconv.FormatFloat(value, 'f', -1, 64)))
+	valueBytes := []byte(strconv.FormatFloat(value, 'f', -1, 64))
+	return s.setValueWithCompression(txn, []byte(strKey), valueBytes)
 }
 
 // INCRBYFLOAT 实现 Redis INCRBYFLOAT 命令，将键的值增加指定浮点数
@@ -330,7 +330,7 @@ func (s *BoltreonStore) APPEND(key string, value string) (int, error) {
 		item, err := txn.Get([]byte(strKey))
 		var existingValue string
 		if err == nil {
-			val, err := item.ValueCopy(nil)
+			val, err := s.getValueWithDecompression(item)
 			if err != nil {
 				return err
 			}
@@ -343,7 +343,7 @@ func (s *BoltreonStore) APPEND(key string, value string) (int, error) {
 		if err := txn.Set(TypeOfKeyGet(key), []byte(KeyTypeString)); err != nil {
 			return err
 		}
-		return txn.Set([]byte(strKey), []byte(newValue))
+		return s.setValueWithCompression(txn, []byte(strKey), []byte(newValue))
 	})
 	return newLength, err
 }
@@ -361,7 +361,7 @@ func (s *BoltreonStore) StrLen(key string) (int, error) {
 			}
 			return err
 		}
-		val, err := item.ValueCopy(nil)
+		val, err := s.getValueWithDecompression(item)
 		if err != nil {
 			return err
 		}
@@ -384,7 +384,7 @@ func (s *BoltreonStore) GetRange(key string, start, end int) (string, error) {
 			}
 			return err
 		}
-		val, err := item.ValueCopy(nil)
+		val, err := s.getValueWithDecompression(item)
 		if err != nil {
 			return err
 		}
@@ -428,7 +428,7 @@ func (s *BoltreonStore) SetRange(key string, offset int, value string) (int, err
 		item, err := txn.Get([]byte(strKey))
 		var existingValue string
 		if err == nil {
-			val, err := item.ValueCopy(nil)
+			val, err := s.getValueWithDecompression(item)
 			if err != nil {
 				return err
 			}
@@ -453,7 +453,7 @@ func (s *BoltreonStore) SetRange(key string, offset int, value string) (int, err
 		if err := txn.Set(TypeOfKeyGet(key), []byte(KeyTypeString)); err != nil {
 			return err
 		}
-		return txn.Set([]byte(strKey), []byte(newValue))
+		return s.setValueWithCompression(txn, []byte(strKey), []byte(newValue))
 	})
 	return newLength, err
 }
@@ -468,7 +468,11 @@ func (s *BoltreonStore) getStringBytes(txn *badger.Txn, key string) ([]byte, err
 		}
 		return nil, err
 	}
-	return item.ValueCopy(nil)
+	val, err := item.ValueCopy(nil)
+	if err != nil {
+		return nil, err
+	}
+	return decompressData(val)
 }
 
 // GetBit 实现 Redis GETBIT 命令，获取指定位的值
@@ -523,12 +527,12 @@ func (s *BoltreonStore) SetBit(key string, offset int, value int) (int, error) {
 		} else {
 			data[byteIndex] &^= (1 << (7 - bitIndex))
 		}
-		// 保存
+		// 保存（带压缩）
 		if err := txn.Set(TypeOfKeyGet(key), []byte(KeyTypeString)); err != nil {
 			return err
 		}
 		strKey := s.stringKey(key)
-		return txn.Set([]byte(strKey), data)
+		return s.setValueWithCompression(txn, []byte(strKey), data)
 	})
 	return oldBit, err
 }
