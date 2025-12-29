@@ -44,7 +44,8 @@ func (s *BoltreonStore) Del(key string) error {
 			}
 			return txn.Delete(typeKey)
 		case KeyTypeSortedSet:
-			if err := deleteByPrefix(txn, []byte(fmt.Sprintf("%s%s", prefixKeySortedSetBytes, key))); err != nil {
+			// SortedSet的键格式是: zset:key:meta, zset:key:data:member, zset:key:index:...
+			if err := deleteByPrefix(txn, []byte(fmt.Sprintf("%s%s:", prefixKeySortedSetBytes, key))); err != nil {
 				return err
 			}
 			return txn.Delete(typeKey)

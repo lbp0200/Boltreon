@@ -3,6 +3,7 @@ package store
 import (
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/lbp0200/Boltreon/internal/helper"
@@ -192,4 +193,360 @@ func splitHashKey(key []byte) (string, string) {
 		return parts[1], parts[2]
 	}
 	return "", ""
+}
+
+// getAllHashFields 获取哈希表中的所有字段
+func (s *BoltreonStore) getAllHashFields(txn *badger.Txn, key string) ([]string, error) {
+	var fields []string
+	prefix := fmt.Sprintf("%s:%s:", KeyTypeHash, key)
+	prefixBytes := []byte(prefix)
+	iter := txn.NewIterator(badger.DefaultIteratorOptions)
+	defer iter.Close()
+
+	for iter.Seek(prefixBytes); iter.Valid(); iter.Next() {
+		k := iter.Item().Key()
+		kStr := string(k)
+		if !strings.HasPrefix(kStr, prefix) {
+			break
+		}
+		_, field := splitHashKey(k)
+		if field != "count" {
+			fields = append(fields, field)
+		}
+	}
+	return fields, nil
+}
+
+// HExists 实现 Redis HEXISTS 命令，检查字段是否存在
+func (s *BoltreonStore) HExists(key, field string) (bool, error) {
+	exists := false
+	err := s.db.View(func(txn *badger.Txn) error {
+		hkey := s.hashKey(key, field)
+		_, err := txn.Get(hkey)
+		if err == nil {
+			exists = true
+			return nil
+		}
+		if errors.Is(err, badger.ErrKeyNotFound) {
+			return nil
+		}
+		return err
+	})
+	return exists, err
+}
+
+// HKeys 实现 Redis HKEYS 命令，获取所有字段名
+func (s *BoltreonStore) HKeys(key string) ([]string, error) {
+	var fields []string
+	err := s.db.View(func(txn *badger.Txn) error {
+		var err error
+		fields, err = s.getAllHashFields(txn, key)
+		return err
+	})
+	return fields, err
+}
+
+// HVals 实现 Redis HVALS 命令，获取所有字段值
+func (s *BoltreonStore) HVals(key string) ([][]byte, error) {
+	var values [][]byte
+	prefix := fmt.Sprintf("%s:%s:", KeyTypeHash, key)
+	err := s.db.View(func(txn *badger.Txn) error {
+		iter := txn.NewIterator(badger.DefaultIteratorOptions)
+		defer iter.Close()
+		prefixBytes := []byte(prefix)
+		for iter.Seek(prefixBytes); iter.Valid(); iter.Next() {
+			k := iter.Item().Key()
+			kStr := string(k)
+			if !strings.HasPrefix(kStr, prefix) {
+				break
+			}
+			_, field := splitHashKey(k)
+			if field == "count" {
+				continue
+			}
+			val, _ := iter.Item().ValueCopy(nil)
+			values = append(values, val)
+		}
+		return nil
+	})
+	return values, err
+}
+
+// HMSet 实现 Redis HMSET 命令，批量设置多个字段
+func (s *BoltreonStore) HMSet(key string, fieldValues map[string]interface{}) error {
+	typeKey := TypeOfKeyGet(key)
+	return s.db.Update(func(txn *badger.Txn) error {
+		if err := txn.Set(typeKey, []byte(KeyTypeHash)); err != nil {
+			return err
+		}
+
+		countKey := s.hashCountKey(key)
+		var currentCount uint64
+		countItem, err := txn.Get(countKey)
+		if err == nil {
+			val, err := countItem.ValueCopy(nil)
+			if err != nil {
+				return fmt.Errorf("HMSet: failed to get count value: %v", err)
+			}
+			currentCount = helper.BytesToUint64(val)
+		}
+
+		newFields := 0
+		for field, value := range fieldValues {
+			bValue, err := helper.InterfaceToBytes(value)
+			if err != nil {
+				return fmt.Errorf("HMSet: failed to convert value for field %s: %v", field, err)
+			}
+			hkey := s.hashKey(key, field)
+
+			// 检查字段是否存在
+			exists := false
+			if _, err := txn.Get(hkey); err == nil {
+				exists = true
+			}
+
+			// 写入字段值
+			if err := txn.Set(hkey, bValue); err != nil {
+				return err
+			}
+
+			if !exists {
+				newFields++
+			}
+		}
+
+		// 更新计数器
+		if newFields > 0 {
+			currentCount += uint64(newFields)
+			return txn.Set(countKey, helper.Uint64ToBytes(currentCount))
+		}
+		return nil
+	})
+}
+
+// HMGet 实现 Redis HMGET 命令，批量获取多个字段值
+func (s *BoltreonStore) HMGet(key string, fields ...string) ([][]byte, error) {
+	values := make([][]byte, len(fields))
+	err := s.db.View(func(txn *badger.Txn) error {
+		for i, field := range fields {
+			hkey := s.hashKey(key, field)
+			item, err := txn.Get(hkey)
+			if errors.Is(err, badger.ErrKeyNotFound) {
+				values[i] = nil
+				continue
+			}
+			if err != nil {
+				return err
+			}
+			val, err := item.ValueCopy(nil)
+			if err != nil {
+				return err
+			}
+			values[i] = val
+		}
+		return nil
+	})
+	return values, err
+}
+
+// HSetNX 实现 Redis HSETNX 命令，仅当字段不存在时设置
+func (s *BoltreonStore) HSetNX(key, field string, value interface{}) (bool, error) {
+	success := false
+	typeKey := TypeOfKeyGet(key)
+	bValue, err := helper.InterfaceToBytes(value)
+	if err != nil {
+		return false, fmt.Errorf("HSetNX: failed to convert value: %v", err)
+	}
+	hkey := s.hashKey(key, field)
+	err = s.db.Update(func(txn *badger.Txn) error {
+		// 检查字段是否存在
+		if _, err := txn.Get(hkey); err == nil {
+			// 字段已存在，不设置
+			return nil
+		}
+		if !errors.Is(err, badger.ErrKeyNotFound) {
+			return err
+		}
+
+		// 字段不存在，设置它
+		if err := txn.Set(typeKey, []byte(KeyTypeHash)); err != nil {
+			return err
+		}
+		if err := txn.Set(hkey, bValue); err != nil {
+			return err
+		}
+
+		// 更新计数器
+		countKey := s.hashCountKey(key)
+		var currentCount uint64
+		countItem, err := txn.Get(countKey)
+		if err == nil {
+			val, err := countItem.ValueCopy(nil)
+			if err != nil {
+				return fmt.Errorf("HSetNX: failed to get count value: %v", err)
+			}
+			currentCount = helper.BytesToUint64(val)
+		}
+		currentCount++
+		if err := txn.Set(countKey, helper.Uint64ToBytes(currentCount)); err != nil {
+			return err
+		}
+
+		success = true
+		return nil
+	})
+	return success, err
+}
+
+// HIncrBy 实现 Redis HINCRBY 命令，将字段值增加整数
+func (s *BoltreonStore) HIncrBy(key, field string, increment int64) (int64, error) {
+	var result int64
+	typeKey := TypeOfKeyGet(key)
+	err := s.db.Update(func(txn *badger.Txn) error {
+		if err := txn.Set(typeKey, []byte(KeyTypeHash)); err != nil {
+			return err
+		}
+
+		hkey := s.hashKey(key, field)
+		var currentValue int64
+		fieldExists := false
+
+		// 获取当前值
+		item, err := txn.Get(hkey)
+		if errors.Is(err, badger.ErrKeyNotFound) {
+			currentValue = 0
+		} else if err != nil {
+			return err
+		} else {
+			fieldExists = true
+			val, err := item.ValueCopy(nil)
+			if err != nil {
+				return err
+			}
+			// 尝试解析为整数（支持字符串格式的整数）
+			intVal, err := strconv.ParseInt(string(val), 10, 64)
+			if err != nil {
+				return fmt.Errorf("HIncrBy: value is not an integer or out of range")
+			}
+			currentValue = intVal
+		}
+
+		// 计算新值
+		result = currentValue + increment
+
+		// 保存新值（存储为字符串，与Redis一致）
+		bValue := []byte(strconv.FormatInt(result, 10))
+		if err := txn.Set(hkey, bValue); err != nil {
+			return err
+		}
+
+		// 更新计数器（如果字段是新创建的）
+		if !fieldExists {
+			countKey := s.hashCountKey(key)
+			var currentCount uint64
+			countItem, err := txn.Get(countKey)
+			if err == nil {
+				val, err := countItem.ValueCopy(nil)
+				if err != nil {
+					return fmt.Errorf("HIncrBy: failed to get count value: %v", err)
+				}
+				currentCount = helper.BytesToUint64(val)
+			}
+			currentCount++
+			if err := txn.Set(countKey, helper.Uint64ToBytes(currentCount)); err != nil {
+				return err
+			}
+		}
+
+		return nil
+	})
+	return result, err
+}
+
+// HIncrByFloat 实现 Redis HINCRBYFLOAT 命令，将字段值增加浮点数
+func (s *BoltreonStore) HIncrByFloat(key, field string, increment float64) (float64, error) {
+	var result float64
+	typeKey := TypeOfKeyGet(key)
+	err := s.db.Update(func(txn *badger.Txn) error {
+		if err := txn.Set(typeKey, []byte(KeyTypeHash)); err != nil {
+			return err
+		}
+
+		hkey := s.hashKey(key, field)
+		var currentValue float64
+		fieldExists := false
+
+		// 获取当前值
+		item, err := txn.Get(hkey)
+		if errors.Is(err, badger.ErrKeyNotFound) {
+			currentValue = 0
+		} else if err != nil {
+			return err
+		} else {
+			fieldExists = true
+			val, err := item.ValueCopy(nil)
+			if err != nil {
+				return err
+			}
+			// 尝试解析为浮点数（支持字符串格式的浮点数）
+			floatVal, err := strconv.ParseFloat(string(val), 64)
+			if err != nil {
+				return fmt.Errorf("HIncrByFloat: value is not a valid float")
+			}
+			currentValue = floatVal
+		}
+
+		// 计算新值
+		result = currentValue + increment
+
+		// 保存新值（存储为字符串，与Redis一致）
+		bValue := []byte(strconv.FormatFloat(result, 'f', -1, 64))
+		if err := txn.Set(hkey, bValue); err != nil {
+			return err
+		}
+
+		// 更新计数器（如果字段是新创建的）
+		if !fieldExists {
+			countKey := s.hashCountKey(key)
+			var currentCount uint64
+			countItem, err := txn.Get(countKey)
+			if err == nil {
+				val, err := countItem.ValueCopy(nil)
+				if err != nil {
+					return fmt.Errorf("HIncrByFloat: failed to get count value: %v", err)
+				}
+				currentCount = helper.BytesToUint64(val)
+			}
+			currentCount++
+			if err := txn.Set(countKey, helper.Uint64ToBytes(currentCount)); err != nil {
+				return err
+			}
+		}
+
+		return nil
+	})
+	return result, err
+}
+
+// HStrLen 实现 Redis HSTRLEN 命令，获取字段值的字符串长度
+func (s *BoltreonStore) HStrLen(key, field string) (int, error) {
+	var length int
+	err := s.db.View(func(txn *badger.Txn) error {
+		hkey := s.hashKey(key, field)
+		item, err := txn.Get(hkey)
+		if errors.Is(err, badger.ErrKeyNotFound) {
+			length = 0
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		val, err := item.ValueCopy(nil)
+		if err != nil {
+			return err
+		}
+		length = len(val)
+		return nil
+	})
+	return length, err
 }
