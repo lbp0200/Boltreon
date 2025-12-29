@@ -1,0 +1,321 @@
+package cluster
+
+import (
+	"crypto/rand"
+	"encoding/hex"
+	"fmt"
+	"sync"
+
+	"github.com/lbp0200/Boltreon/internal/store"
+)
+
+// Cluster 表示Redis集群
+type Cluster struct {
+	Myself    *Node              // 当前节点
+	Nodes     map[string]*Node   // 所有节点，key为节点ID
+	Slots     [SlotCount]*Node   // 槽位到节点的映射
+	Store     *store.BoltreonStore // 数据存储
+	Epoch     int64              // 当前配置纪元
+	mu        sync.RWMutex       // 保护集群状态的锁
+}
+
+// NewCluster 创建新集群
+func NewCluster(store *store.BoltreonStore, nodeID, addr string) (*Cluster, error) {
+	if nodeID == "" {
+		// 生成随机节点ID
+		var err error
+		nodeID, err = generateNodeID()
+		if err != nil {
+			return nil, fmt.Errorf("failed to generate node ID: %w", err)
+		}
+	}
+
+	myself := NewNode(nodeID, addr)
+	myself.SetMyself()
+	myself.Flags = append(myself.Flags, "master")
+
+	cluster := &Cluster{
+		Myself: myself,
+		Nodes:   make(map[string]*Node),
+		Store:   store,
+		Epoch:   0,
+	}
+	cluster.Nodes[nodeID] = myself
+
+	// 初始化时，当前节点负责所有槽位
+	for i := uint32(0); i < SlotCount; i++ {
+		cluster.Slots[i] = myself
+	}
+	myself.AddSlotRange(0, SlotCount-1)
+
+	return cluster, nil
+}
+
+// generateNodeID 生成40字符的十六进制节点ID
+func generateNodeID() (string, error) {
+	bytes := make([]byte, 20)
+	if _, err := rand.Read(bytes); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(bytes), nil
+}
+
+// GetNodeBySlot 根据槽位获取负责该槽位的节点
+func (c *Cluster) GetNodeBySlot(slot uint32) *Node {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if slot >= SlotCount {
+		return nil
+	}
+	return c.Slots[slot]
+}
+
+// GetNodeByID 根据节点ID获取节点
+func (c *Cluster) GetNodeByID(nodeID string) *Node {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.Nodes[nodeID]
+}
+
+// AddNode 添加节点到集群
+func (c *Cluster) AddNode(node *Node) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.Nodes[node.ID] = node
+}
+
+// RemoveNode 从集群中移除节点
+func (c *Cluster) RemoveNode(nodeID string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.Nodes, nodeID)
+	// 将该节点负责的槽位重新分配给当前节点
+	for i := uint32(0); i < SlotCount; i++ {
+		if c.Slots[i] != nil && c.Slots[i].ID == nodeID {
+			c.Slots[i] = c.Myself
+		}
+	}
+}
+
+// AssignSlot 将槽位分配给指定节点
+func (c *Cluster) AssignSlot(slot uint32, nodeID string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if slot >= SlotCount {
+		return fmt.Errorf("slot %d out of range", slot)
+	}
+
+	node, exists := c.Nodes[nodeID]
+	if !exists {
+		return fmt.Errorf("node %s not found", nodeID)
+	}
+
+	// 从旧节点移除槽位
+	oldNode := c.Slots[slot]
+	if oldNode != nil {
+		// 更新旧节点的槽位范围（简化处理，实际应该合并范围）
+	}
+
+	c.Slots[slot] = node
+	node.AddSlotRange(slot, slot)
+
+	return nil
+}
+
+// AssignSlotRange 将槽位范围分配给指定节点
+func (c *Cluster) AssignSlotRange(start, end uint32, nodeID string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if start >= SlotCount || end >= SlotCount || start > end {
+		return fmt.Errorf("invalid slot range: %d-%d", start, end)
+	}
+
+	node, exists := c.Nodes[nodeID]
+	if !exists {
+		return fmt.Errorf("node %s not found", nodeID)
+	}
+
+	for i := start; i <= end; i++ {
+		c.Slots[i] = node
+	}
+	node.AddSlotRange(start, end)
+
+	return nil
+}
+
+// GetSlotOwner 获取槽位的所有者节点
+func (c *Cluster) GetSlotOwner(slot uint32) *Node {
+	return c.GetNodeBySlot(slot)
+}
+
+// IsSlotLocal 检查槽位是否属于当前节点
+func (c *Cluster) IsSlotLocal(slot uint32) bool {
+	node := c.GetNodeBySlot(slot)
+	return node != nil && node.ID == c.Myself.ID
+}
+
+// GetClusterNodes 获取所有节点的字符串表示（用于CLUSTER NODES命令）
+func (c *Cluster) GetClusterNodes() []string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	var result []string
+	for _, node := range c.Nodes {
+		line := c.formatNodeLine(node)
+		result = append(result, line)
+	}
+	return result
+}
+
+// formatNodeLine 格式化节点行为CLUSTER NODES格式
+func (c *Cluster) formatNodeLine(node *Node) string {
+	// 格式: <id> <ip:port> <flags> <master> <ping-sent> <pong-recv> <epoch> <link-state> <slots>
+	flags := ""
+	if len(node.Flags) > 0 {
+		flags = node.Flags[0]
+		for i := 1; i < len(node.Flags); i++ {
+			flags += "," + node.Flags[i]
+		}
+	}
+
+	masterID := "-"
+	if node.MasterID != "" {
+		masterID = node.MasterID
+	}
+
+	slots := ""
+	if len(node.Slots) > 0 {
+		slotStrs := []string{}
+		for _, r := range node.Slots {
+			if r.Start == r.End {
+				slotStrs = append(slotStrs, fmt.Sprintf("%d", r.Start))
+			} else {
+				slotStrs = append(slotStrs, fmt.Sprintf("%d-%d", r.Start, r.End))
+			}
+		}
+		slots = fmt.Sprintf(" %s", fmt.Sprintf("%v", slotStrs))
+	}
+
+	return fmt.Sprintf("%s %s %s %s %d %d %d connected%s",
+		node.ID, node.Addr, flags, masterID,
+		node.PingSent, node.PongRecv, node.Epoch, slots)
+}
+
+// GetClusterSlots 获取槽位分配信息（用于CLUSTER SLOTS命令）
+func (c *Cluster) GetClusterSlots() [][]interface{} {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	// 合并连续的槽位范围
+	ranges := c.mergeSlotRanges()
+
+	result := make([][]interface{}, 0, len(ranges))
+	for _, r := range ranges {
+		node := c.Slots[r.Start]
+		if node == nil {
+			continue
+		}
+
+		// 格式: [start, end, [ip, port, nodeid], ...]
+		host, port, err := node.GetHostPort()
+		if err != nil {
+			continue
+		}
+
+		slotInfo := []interface{}{
+			int64(r.Start),
+			int64(r.End),
+			[]interface{}{host, port, node.ID},
+		}
+
+		// 如果有replica，添加replica信息
+		// 这里简化处理，实际应该查找该节点的slave节点
+
+		result = append(result, slotInfo)
+	}
+
+	return result
+}
+
+// mergeSlotRanges 合并连续的槽位范围
+func (c *Cluster) mergeSlotRanges() []SlotRange {
+	// 按节点分组槽位
+	nodeSlots := make(map[string][]uint32)
+	for i := uint32(0); i < SlotCount; i++ {
+		if c.Slots[i] != nil {
+			nodeID := c.Slots[i].ID
+			nodeSlots[nodeID] = append(nodeSlots[nodeID], i)
+		}
+	}
+
+	// 为每个节点合并连续的槽位
+	var allRanges []SlotRange
+	for _, slots := range nodeSlots {
+		ranges := mergeConsecutiveSlots(slots)
+		allRanges = append(allRanges, ranges...)
+	}
+
+	return allRanges
+}
+
+// mergeConsecutiveSlots 合并连续的槽位
+func mergeConsecutiveSlots(slots []uint32) []SlotRange {
+	if len(slots) == 0 {
+		return nil
+	}
+
+	// 排序槽位（这里假设已经排序，实际应该先排序）
+	ranges := []SlotRange{}
+	start := slots[0]
+	end := slots[0]
+
+	for i := 1; i < len(slots); i++ {
+		if slots[i] == end+1 {
+			end = slots[i]
+		} else {
+			ranges = append(ranges, SlotRange{Start: start, End: end})
+			start = slots[i]
+			end = slots[i]
+		}
+	}
+	ranges = append(ranges, SlotRange{Start: start, End: end})
+
+	return ranges
+}
+
+// GetMyself 获取当前节点
+func (c *Cluster) GetMyself() *Node {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.Myself
+}
+
+// IncrementEpoch 增加配置纪元
+func (c *Cluster) IncrementEpoch() int64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.Epoch++
+	return c.Epoch
+}
+
+// GetEpoch 获取当前配置纪元
+func (c *Cluster) GetEpoch() int64 {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.Epoch
+}
+
+// UpdateNodeEpoch 更新节点的配置纪元
+func (c *Cluster) UpdateNodeEpoch(nodeID string, epoch int64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if node, exists := c.Nodes[nodeID]; exists {
+		node.Epoch = epoch
+		if epoch > c.Epoch {
+			c.Epoch = epoch
+		}
+	}
+}
+

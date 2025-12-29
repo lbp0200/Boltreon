@@ -7,12 +7,14 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/lbp0200/Boltreon/internal/cluster"
 	"github.com/lbp0200/Boltreon/internal/proto"
 	"github.com/lbp0200/Boltreon/internal/store"
 )
 
 type Handler struct {
-	Db *store.BoltreonStore
+	Db      *store.BoltreonStore
+	Cluster *cluster.Cluster
 }
 
 // ServeTCP 监听并处理连接
@@ -1311,6 +1313,44 @@ func (h *Handler) executeCommand(cmd string, args [][]byte) proto.RESP {
 			return proto.NewError(fmt.Sprintf("ERR %v", err))
 		}
 		return proto.NewBulkString([]byte(fmt.Sprintf("%.10g", score)))
+
+	// Cluster命令
+	case "CLUSTER":
+		if h.Cluster == nil {
+			return proto.NewError("ERR This instance has cluster support disabled")
+		}
+		if len(args) == 0 {
+			return proto.NewError("ERR wrong number of arguments for 'CLUSTER' command")
+		}
+		clusterCmd := cluster.NewClusterCommands(h.Cluster)
+		subcommandArgs := make([]string, len(args))
+		for i, arg := range args {
+			subcommandArgs[i] = string(arg)
+		}
+		result, err := clusterCmd.HandleCommand(subcommandArgs)
+		if err != nil {
+			return proto.NewError(fmt.Sprintf("ERR %v", err))
+		}
+		// 根据返回类型转换
+		switch v := result.(type) {
+		case string:
+			return proto.NewSimpleString(v)
+		case int64:
+			return proto.NewInteger(v)
+		case []string:
+			// 对于CLUSTER NODES，返回多行字符串
+			return proto.NewSimpleString(strings.Join(v, "\n"))
+		case []interface{}:
+			// 对于CLUSTER SLOTS，返回数组
+			// 简化处理：转换为字符串数组
+			strs := make([][]byte, len(v))
+			for i, item := range v {
+				strs[i] = []byte(fmt.Sprintf("%v", item))
+			}
+			return &proto.Array{Args: strs}
+		default:
+			return proto.NewSimpleString(fmt.Sprintf("%v", v))
+		}
 
 	default:
 		return proto.NewError(fmt.Sprintf("ERR unknown command '%s'", cmd))
