@@ -1,0 +1,612 @@
+package server
+
+import (
+	"bufio"
+	"bytes"
+	"fmt"
+	"io"
+	"net"
+	"strconv"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/lbp0200/Boltreon/internal/proto"
+	"github.com/lbp0200/Boltreon/internal/store"
+	"github.com/zeebo/assert"
+)
+
+// setupTestHandler 创建测试用的Handler
+func setupTestHandler(t *testing.T) *Handler {
+	dbPath := t.TempDir()
+	db, err := store.NewBoltreonStore(dbPath)
+	assert.NoError(t, err)
+	return &Handler{Db: db}
+}
+
+// TestExecuteCommand 单元测试：直接测试executeCommand函数
+func TestExecuteCommand(t *testing.T) {
+	handler := setupTestHandler(t)
+	defer handler.Db.Close()
+
+	tests := []struct {
+		name     string
+		cmd      string
+		args     [][]byte
+		validate func(t *testing.T, resp proto.RESP)
+	}{
+		{
+			name: "PING",
+			cmd:  "PING",
+			args: nil,
+			validate: func(t *testing.T, resp proto.RESP) {
+				assert.Equal(t, proto.OK, resp)
+			},
+		},
+		{
+			name: "SET and GET",
+			cmd:  "SET",
+			args: [][]byte{[]byte("key1"), []byte("value1")},
+			validate: func(t *testing.T, resp proto.RESP) {
+				assert.Equal(t, proto.OK, resp)
+				// Test GET
+				getResp := handler.executeCommand("GET", [][]byte{[]byte("key1")})
+				bulk, ok := getResp.(*proto.BulkString)
+				assert.True(t, ok)
+				assert.Equal(t, "value1", string(*bulk))
+			},
+		},
+		{
+			name: "SET with wrong args",
+			cmd:  "SET",
+			args: [][]byte{[]byte("key1")},
+			validate: func(t *testing.T, resp proto.RESP) {
+				err, ok := resp.(*proto.Error)
+				assert.True(t, ok)
+				assert.True(t, strings.Contains(string(*err), "wrong number of arguments"))
+			},
+		},
+		{
+			name: "INCR",
+			cmd:  "INCR",
+			args: [][]byte{[]byte("counter")},
+			validate: func(t *testing.T, resp proto.RESP) {
+				integer, ok := resp.(*proto.Integer)
+				assert.True(t, ok)
+				assert.Equal(t, int64(1), int64(*integer))
+			},
+		},
+		{
+			name: "EXISTS",
+			cmd:  "EXISTS",
+			args: [][]byte{[]byte("nonexistent")},
+			validate: func(t *testing.T, resp proto.RESP) {
+				integer, ok := resp.(*proto.Integer)
+				assert.True(t, ok)
+				assert.Equal(t, int64(0), int64(*integer))
+			},
+		},
+		{
+			name: "Unknown command",
+			cmd:  "UNKNOWN",
+			args: nil,
+			validate: func(t *testing.T, resp proto.RESP) {
+				err, ok := resp.(*proto.Error)
+				assert.True(t, ok)
+				assert.True(t, strings.Contains(string(*err), "unknown command"))
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resp := handler.executeCommand(tt.cmd, tt.args)
+			tt.validate(t, resp)
+		})
+	}
+}
+
+// readRESPResponse 辅助函数：读取并解析RESP响应
+func readRESPResponse(reader *bufio.Reader) (proto.RESP, error) {
+	// 读取第一行来确定响应类型
+	line, err := reader.ReadBytes('\n')
+	if err != nil {
+		return nil, err
+	}
+	// 去掉\r\n
+	line = bytes.TrimRight(line, "\r\n")
+
+	if len(line) == 0 {
+		return nil, fmt.Errorf("empty response")
+	}
+
+	switch line[0] {
+	case '+': // Simple String
+		return proto.NewSimpleString(string(line[1:])), nil
+	case '-': // Error
+		return proto.NewError(string(line[1:])), nil
+	case ':': // Integer
+		val, err := strconv.ParseInt(string(line[1:]), 10, 64)
+		if err != nil {
+			return nil, err
+		}
+		return proto.NewInteger(val), nil
+	case '$': // Bulk String
+		length, err := strconv.Atoi(string(line[1:]))
+		if err != nil {
+			return nil, err
+		}
+		if length == -1 {
+			return proto.NewBulkString(nil), nil
+		}
+		data := make([]byte, length)
+		_, err = io.ReadFull(reader, data)
+		if err != nil {
+			return nil, err
+		}
+		// 读取\r\n
+		_, _ = reader.ReadBytes('\n')
+		return proto.NewBulkString(data), nil
+	case '*': // Array
+		return proto.ReadRESP(reader)
+	default:
+		return nil, fmt.Errorf("unknown RESP type: %c", line[0])
+	}
+}
+
+// TestTCPIntegration 集成测试：通过TCP连接测试完整的请求-响应流程
+func TestTCPIntegration(t *testing.T) {
+	handler := setupTestHandler(t)
+	defer handler.Db.Close()
+
+	// 启动测试服务器
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	assert.NoError(t, err)
+	defer listener.Close()
+
+	// 在goroutine中运行服务器
+	go func() {
+		_ = handler.ServeTCP(listener)
+	}()
+
+	// 等待服务器启动
+	time.Sleep(10 * time.Millisecond)
+
+	// 连接到服务器
+	conn, err := net.Dial("tcp", listener.Addr().String())
+	assert.NoError(t, err)
+	defer conn.Close()
+
+	reader := bufio.NewReader(conn)
+
+	tests := []struct {
+		name     string
+		command  string
+		args     []string
+		validate func(t *testing.T, resp proto.RESP)
+	}{
+		{
+			name:    "PING",
+			command: "PING",
+			args:    nil,
+			validate: func(t *testing.T, resp proto.RESP) {
+				simple, ok := resp.(*proto.SimpleString)
+				assert.True(t, ok)
+				assert.Equal(t, "OK", string(*simple))
+			},
+		},
+		{
+			name:    "SET",
+			command: "SET",
+			args:    []string{"testkey", "testvalue"},
+			validate: func(t *testing.T, resp proto.RESP) {
+				simple, ok := resp.(*proto.SimpleString)
+				assert.True(t, ok)
+				assert.Equal(t, "OK", string(*simple))
+			},
+		},
+		{
+			name:    "GET",
+			command: "GET",
+			args:    []string{"testkey"},
+			validate: func(t *testing.T, resp proto.RESP) {
+				bulk, ok := resp.(*proto.BulkString)
+				assert.True(t, ok)
+				assert.Equal(t, "testvalue", string(*bulk))
+			},
+		},
+		{
+			name:    "GET nonexistent",
+			command: "GET",
+			args:    []string{"nonexistent"},
+			validate: func(t *testing.T, resp proto.RESP) {
+				bulk, ok := resp.(*proto.BulkString)
+				assert.True(t, ok)
+				assert.Nil(t, []byte(*bulk))
+			},
+		},
+		{
+			name:    "INCR",
+			command: "INCR",
+			args:    []string{"counter"},
+			validate: func(t *testing.T, resp proto.RESP) {
+				integer, ok := resp.(*proto.Integer)
+				assert.True(t, ok)
+				assert.Equal(t, int64(1), int64(*integer))
+			},
+		},
+		{
+			name:    "INCRBY",
+			command: "INCRBY",
+			args:    []string{"counter", "5"},
+			validate: func(t *testing.T, resp proto.RESP) {
+				integer, ok := resp.(*proto.Integer)
+				assert.True(t, ok)
+				assert.Equal(t, int64(6), int64(*integer))
+			},
+		},
+		{
+			name:    "EXISTS",
+			command: "EXISTS",
+			args:    []string{"testkey"},
+			validate: func(t *testing.T, resp proto.RESP) {
+				integer, ok := resp.(*proto.Integer)
+				assert.True(t, ok)
+				assert.Equal(t, int64(1), int64(*integer))
+			},
+		},
+		{
+			name:    "TYPE",
+			command: "TYPE",
+			args:    []string{"testkey"},
+			validate: func(t *testing.T, resp proto.RESP) {
+				simple, ok := resp.(*proto.SimpleString)
+				assert.True(t, ok)
+				assert.Equal(t, "string", string(*simple))
+			},
+		},
+		{
+			name:    "DEL",
+			command: "DEL",
+			args:    []string{"testkey"},
+			validate: func(t *testing.T, resp proto.RESP) {
+				integer, ok := resp.(*proto.Integer)
+				assert.True(t, ok)
+				assert.Equal(t, int64(1), int64(*integer))
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// 构建RESP命令
+			cmdArgs := make([][]byte, 1+len(tt.args))
+			cmdArgs[0] = []byte(tt.command)
+			for i, arg := range tt.args {
+				cmdArgs[i+1] = []byte(arg)
+			}
+			req := &proto.Array{Args: cmdArgs}
+
+			// 发送命令
+			err := proto.WriteRESP(conn, req)
+			assert.NoError(t, err)
+
+			// 读取并解析响应
+			resp, err := readRESPResponse(reader)
+			assert.NoError(t, err)
+
+			// 验证响应
+			tt.validate(t, resp)
+		})
+	}
+}
+
+
+// TestListCommands 测试List相关命令
+func TestListCommands(t *testing.T) {
+	handler := setupTestHandler(t)
+	defer handler.Db.Close()
+
+	// LPUSH
+	resp := handler.executeCommand("LPUSH", [][]byte{[]byte("mylist"), []byte("world"), []byte("hello")})
+	integer, ok := resp.(*proto.Integer)
+	assert.True(t, ok)
+	assert.Equal(t, int64(2), int64(*integer))
+
+	// LLEN
+	resp = handler.executeCommand("LLEN", [][]byte{[]byte("mylist")})
+	integer, ok = resp.(*proto.Integer)
+	assert.True(t, ok)
+	assert.Equal(t, int64(2), int64(*integer))
+
+	// LPOP
+	resp = handler.executeCommand("LPOP", [][]byte{[]byte("mylist")})
+	bulk, ok := resp.(*proto.BulkString)
+	assert.True(t, ok)
+	assert.Equal(t, "hello", string(*bulk))
+}
+
+// TestHashCommands 测试Hash相关命令
+func TestHashCommands(t *testing.T) {
+	handler := setupTestHandler(t)
+	defer handler.Db.Close()
+
+	// HSET
+	resp := handler.executeCommand("HSET", [][]byte{[]byte("user:1"), []byte("name"), []byte("Alice"), []byte("age"), []byte("30")})
+	integer, ok := resp.(*proto.Integer)
+	assert.True(t, ok)
+	assert.Equal(t, int64(2), int64(*integer))
+
+	// HGET
+	resp = handler.executeCommand("HGET", [][]byte{[]byte("user:1"), []byte("name")})
+	bulk, ok := resp.(*proto.BulkString)
+	assert.True(t, ok)
+	assert.Equal(t, "Alice", string(*bulk))
+
+	// HLEN
+	resp = handler.executeCommand("HLEN", [][]byte{[]byte("user:1")})
+	integer, ok = resp.(*proto.Integer)
+	assert.True(t, ok)
+	assert.Equal(t, int64(2), int64(*integer))
+}
+
+// TestSetCommands 测试Set相关命令
+func TestSetCommands(t *testing.T) {
+	handler := setupTestHandler(t)
+	defer handler.Db.Close()
+
+	// SADD
+	resp := handler.executeCommand("SADD", [][]byte{[]byte("myset"), []byte("member1"), []byte("member2")})
+	integer, ok := resp.(*proto.Integer)
+	assert.True(t, ok)
+	assert.Equal(t, int64(2), int64(*integer))
+
+	// SCARD
+	resp = handler.executeCommand("SCARD", [][]byte{[]byte("myset")})
+	integer, ok = resp.(*proto.Integer)
+	assert.True(t, ok)
+	assert.Equal(t, int64(2), int64(*integer))
+
+	// SISMEMBER
+	resp = handler.executeCommand("SISMEMBER", [][]byte{[]byte("myset"), []byte("member1")})
+	integer, ok = resp.(*proto.Integer)
+	assert.True(t, ok)
+	assert.Equal(t, int64(1), int64(*integer))
+}
+
+// TestSortedSetCommands 测试SortedSet相关命令
+func TestSortedSetCommands(t *testing.T) {
+	handler := setupTestHandler(t)
+	defer handler.Db.Close()
+
+	// ZADD
+	resp := handler.executeCommand("ZADD", [][]byte{
+		[]byte("zset"),
+		[]byte("1.0"),
+		[]byte("member1"),
+		[]byte("2.0"),
+		[]byte("member2"),
+	})
+	integer, ok := resp.(*proto.Integer)
+	assert.True(t, ok)
+	assert.Equal(t, int64(2), int64(*integer))
+
+	// ZCARD
+	resp = handler.executeCommand("ZCARD", [][]byte{[]byte("zset")})
+	integer, ok = resp.(*proto.Integer)
+	assert.True(t, ok)
+	assert.Equal(t, int64(2), int64(*integer))
+
+	// ZSCORE
+	resp = handler.executeCommand("ZSCORE", [][]byte{[]byte("zset"), []byte("member1")})
+	bulk, ok := resp.(*proto.BulkString)
+	assert.True(t, ok)
+	assert.Equal(t, "1", string(*bulk))
+}
+
+// TestErrorHandling 测试错误处理
+func TestErrorHandling(t *testing.T) {
+	handler := setupTestHandler(t)
+	defer handler.Db.Close()
+
+	tests := []struct {
+		name     string
+		cmd      string
+		args     [][]byte
+		wantErr  bool
+		errMsg   string
+	}{
+		{
+			name:    "SET with insufficient args",
+			cmd:     "SET",
+			args:    [][]byte{[]byte("key")},
+			wantErr: true,
+			errMsg:  "wrong number of arguments",
+		},
+		{
+			name:    "GET with no args",
+			cmd:     "GET",
+			args:    nil,
+			wantErr: true,
+			errMsg:  "wrong number of arguments",
+		},
+		{
+			name:    "INCRBY with invalid number",
+			cmd:     "INCRBY",
+			args:    [][]byte{[]byte("key"), []byte("notanumber")},
+			wantErr: true,
+			errMsg:  "value is not an integer",
+		},
+		{
+			name:    "Unknown command",
+			cmd:     "UNKNOWNCMD",
+			args:    nil,
+			wantErr: true,
+			errMsg:  "unknown command",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resp := handler.executeCommand(tt.cmd, tt.args)
+			err, ok := resp.(*proto.Error)
+			if tt.wantErr {
+				assert.True(t, ok)
+				assert.True(t, strings.Contains(string(*err), tt.errMsg))
+			} else {
+				assert.False(t, ok)
+			}
+		})
+	}
+}
+
+// TestConcurrentConnections 测试并发连接
+func TestConcurrentConnections(t *testing.T) {
+	handler := setupTestHandler(t)
+	defer handler.Db.Close()
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	assert.NoError(t, err)
+	defer listener.Close()
+
+	go func() {
+		_ = handler.ServeTCP(listener)
+	}()
+
+	time.Sleep(10 * time.Millisecond)
+
+	// 创建多个并发连接
+	const numConnections = 10
+	done := make(chan bool, numConnections)
+
+	for i := 0; i < numConnections; i++ {
+		go func(id int) {
+			conn, err := net.Dial("tcp", listener.Addr().String())
+			assert.NoError(t, err)
+			defer conn.Close()
+
+			// 每个连接执行SET和GET
+			key := fmt.Sprintf("key%d", id)
+			value := fmt.Sprintf("value%d", id)
+
+			// SET
+			req := &proto.Array{
+				Args: [][]byte{[]byte("SET"), []byte(key), []byte(value)},
+			}
+			err = proto.WriteRESP(conn, req)
+			assert.NoError(t, err)
+
+			// 读取响应
+			reader := bufio.NewReader(conn)
+			resp, err := proto.ReadRESP(reader)
+			assert.NoError(t, err)
+			assert.NotNil(t, resp)
+
+			// GET
+			req = &proto.Array{
+				Args: [][]byte{[]byte("GET"), []byte(key)},
+			}
+			err = proto.WriteRESP(conn, req)
+			assert.NoError(t, err)
+
+			resp, err = proto.ReadRESP(reader)
+			assert.NoError(t, err)
+			assert.NotNil(t, resp)
+
+			done <- true
+		}(i)
+	}
+
+	// 等待所有goroutine完成
+	for i := 0; i < numConnections; i++ {
+		<-done
+	}
+}
+
+// BenchmarkExecuteCommand 性能测试
+func BenchmarkExecuteCommand(b *testing.B) {
+	handler := setupTestHandler(&testing.T{})
+	defer handler.Db.Close()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		key := fmt.Sprintf("key%d", i)
+		value := fmt.Sprintf("value%d", i)
+		_ = handler.executeCommand("SET", [][]byte{[]byte(key), []byte(value)})
+		_ = handler.executeCommand("GET", [][]byte{[]byte(key)})
+	}
+}
+
+// sendCommand 辅助函数：发送命令并读取响应
+func sendCommand(conn net.Conn, reader *bufio.Reader, cmd string, args ...string) (proto.RESP, error) {
+	cmdArgs := make([][]byte, 1+len(args))
+	cmdArgs[0] = []byte(cmd)
+	for i, arg := range args {
+		cmdArgs[i+1] = []byte(arg)
+	}
+	req := &proto.Array{Args: cmdArgs}
+
+	if err := proto.WriteRESP(conn, req); err != nil {
+		return nil, err
+	}
+
+	return readRESPResponse(reader)
+}
+
+// TestRealWorldScenario 测试真实场景
+func TestRealWorldScenario(t *testing.T) {
+	handler := setupTestHandler(t)
+	defer handler.Db.Close()
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	assert.NoError(t, err)
+	defer listener.Close()
+
+	go func() {
+		_ = handler.ServeTCP(listener)
+	}()
+
+	time.Sleep(10 * time.Millisecond)
+
+	conn, err := net.Dial("tcp", listener.Addr().String())
+	assert.NoError(t, err)
+	defer conn.Close()
+
+	reader := bufio.NewReader(conn)
+
+	// 场景1：用户会话管理
+	// SET session:user1 "token123"
+	_, err = sendCommand(conn, reader, "SET", "session:user1", "token123")
+	assert.NoError(t, err)
+
+	// EXPIRE session:user1 3600
+	_, err = sendCommand(conn, reader, "EXPIRE", "session:user1", "3600")
+	assert.NoError(t, err)
+
+	// GET session:user1
+	_, err = sendCommand(conn, reader, "GET", "session:user1")
+	assert.NoError(t, err)
+
+	// 场景2：计数器
+	// INCR page:views
+	_, err = sendCommand(conn, reader, "INCR", "page:views")
+	assert.NoError(t, err)
+
+	// INCRBY page:views 10
+	_, err = sendCommand(conn, reader, "INCRBY", "page:views", "10")
+	assert.NoError(t, err)
+
+	// 场景3：购物车（使用Hash）
+	// HSET cart:user1 item1 2
+	_, err = sendCommand(conn, reader, "HSET", "cart:user1", "item1", "2")
+	assert.NoError(t, err)
+
+	// HSET cart:user1 item2 1
+	_, err = sendCommand(conn, reader, "HSET", "cart:user1", "item2", "1")
+	assert.NoError(t, err)
+
+	// HGETALL cart:user1
+	_, err = sendCommand(conn, reader, "HGETALL", "cart:user1")
+	assert.NoError(t, err)
+}
+

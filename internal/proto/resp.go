@@ -49,9 +49,6 @@ func ReadRESP(r *bufio.Reader) (*Array, error) {
 		return nil, err
 	}
 
-	// 调试：打印干净的行
-	fmt.Printf("Read line: %q (bytes: %v)\n", line, line)
-
 	if len(line) == 0 {
 		return nil, fmt.Errorf("empty line")
 	}
@@ -72,7 +69,6 @@ func ReadRESP(r *bufio.Reader) (*Array, error) {
 			if err != nil {
 				return nil, err
 			}
-			fmt.Printf("Bulk length line: %q\n", lenLine)
 			if len(lenLine) == 0 || lenLine[0] != '$' {
 				return nil, fmt.Errorf("expected $, got %q", lenLine)
 			}
@@ -92,7 +88,6 @@ func ReadRESP(r *bufio.Reader) (*Array, error) {
 				return nil, err
 			}
 			args[i] = data[:bulkLen] // 去掉 \r\n
-			fmt.Printf("Bulk data: %q\n", args[i])
 		}
 		return &Array{Args: args}, nil
 	}
