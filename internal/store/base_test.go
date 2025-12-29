@@ -1,6 +1,7 @@
 package store
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/zeebo/assert"
@@ -420,4 +421,363 @@ func TestDelComplexSortedSet(t *testing.T) {
 	assert.NoError(t, err)
 	assert.False(t, exists)
 	assert.Equal(t, 0.0, score)
+}
+
+func TestExists(t *testing.T) {
+	dbPath := t.TempDir()
+	store, _ := NewBadgerStore(dbPath)
+	defer store.Close()
+
+	key := "test_exists"
+
+	// 不存在的键
+	exists, err := store.Exists(key)
+	assert.NoError(t, err)
+	assert.False(t, exists)
+
+	// 设置键
+	store.Set(key, "value")
+	exists, err = store.Exists(key)
+	assert.NoError(t, err)
+	assert.True(t, exists)
+
+	// 删除键
+	store.Del(key)
+	exists, err = store.Exists(key)
+	assert.NoError(t, err)
+	assert.False(t, exists)
+}
+
+func TestType(t *testing.T) {
+	dbPath := t.TempDir()
+	store, _ := NewBadgerStore(dbPath)
+	defer store.Close()
+
+	// 不存在的键
+	keyType, err := store.Type("nonexistent")
+	assert.NoError(t, err)
+	assert.Equal(t, "none", keyType)
+
+	// String类型
+	store.Set("str_key", "value")
+	keyType, err = store.Type("str_key")
+	assert.NoError(t, err)
+	assert.Equal(t, "string", keyType)
+
+	// List类型
+	store.LPush("list_key", "value")
+	keyType, err = store.Type("list_key")
+	assert.NoError(t, err)
+	assert.Equal(t, "list", keyType)
+
+	// Hash类型
+	store.HSet("hash_key", "field", "value")
+	keyType, err = store.Type("hash_key")
+	assert.NoError(t, err)
+	assert.Equal(t, "hash", keyType)
+
+	// Set类型
+	store.SAdd("set_key", "member")
+	keyType, err = store.Type("set_key")
+	assert.NoError(t, err)
+	assert.Equal(t, "set", keyType)
+
+	// SortedSet类型
+	store.ZAdd("zset_key", []ZSetMember{{Member: "member", Score: 1.0}})
+	keyType, err = store.Type("zset_key")
+	assert.NoError(t, err)
+	assert.Equal(t, "zset", keyType)
+}
+
+func TestExpire(t *testing.T) {
+	dbPath := t.TempDir()
+	store, _ := NewBadgerStore(dbPath)
+	defer store.Close()
+
+	key := "test_expire"
+
+	// 设置键
+	store.Set(key, "value")
+
+	// 设置过期时间
+	success, err := store.Expire(key, 10)
+	assert.NoError(t, err)
+	assert.True(t, success)
+
+	// 验证TTL
+	ttl, err := store.TTL(key)
+	assert.NoError(t, err)
+	assert.True(t, ttl > 0 && ttl <= 10)
+
+	// 不存在的键
+	success, err = store.Expire("nonexistent", 10)
+	assert.NoError(t, err)
+	assert.False(t, success)
+}
+
+func TestTTL(t *testing.T) {
+	dbPath := t.TempDir()
+	store, _ := NewBadgerStore(dbPath)
+	defer store.Close()
+
+	key := "test_ttl"
+
+	// 不存在的键
+	ttl, err := store.TTL(key)
+	assert.NoError(t, err)
+	assert.Equal(t, int64(-2), ttl)
+
+	// 设置键（无过期时间）
+	store.Set(key, "value")
+	ttl, err = store.TTL(key)
+	assert.NoError(t, err)
+	assert.Equal(t, int64(-1), ttl) // -1表示没有过期时间
+
+	// 设置过期时间
+	store.Expire(key, 10)
+	ttl, err = store.TTL(key)
+	assert.NoError(t, err)
+	assert.True(t, ttl > 0 && ttl <= 10)
+}
+
+func TestPTTL(t *testing.T) {
+	dbPath := t.TempDir()
+	store, _ := NewBadgerStore(dbPath)
+	defer store.Close()
+
+	key := "test_pttl"
+
+	// 不存在的键
+	pttl, err := store.PTTL(key)
+	assert.NoError(t, err)
+	assert.Equal(t, int64(-2), pttl)
+
+	// 设置键（无过期时间）
+	store.Set(key, "value")
+	pttl, err = store.PTTL(key)
+	assert.NoError(t, err)
+	assert.Equal(t, int64(-1), pttl) // -1表示没有过期时间
+
+	// 设置过期时间（毫秒）
+	store.PExpire(key, 10000)
+	pttl, err = store.PTTL(key)
+	assert.NoError(t, err)
+	assert.True(t, pttl > 0 && pttl <= 10000)
+}
+
+func TestPersist(t *testing.T) {
+	dbPath := t.TempDir()
+	store, _ := NewBadgerStore(dbPath)
+	defer store.Close()
+
+	key := "test_persist"
+
+	// 设置键（无过期时间）
+	store.Set(key, "value")
+	success, err := store.Persist(key)
+	assert.NoError(t, err)
+	assert.False(t, success) // 没有TTL，返回false
+
+	// 设置过期时间
+	store.Expire(key, 10)
+	ttl, _ := store.TTL(key)
+	assert.True(t, ttl > 0)
+
+	// 移除过期时间
+	success, err = store.Persist(key)
+	assert.NoError(t, err)
+	assert.True(t, success)
+
+	// 验证TTL为-1
+	ttl, err = store.TTL(key)
+	assert.NoError(t, err)
+	assert.Equal(t, int64(-1), ttl)
+
+	// 不存在的键
+	success, err = store.Persist("nonexistent")
+	assert.NoError(t, err)
+	assert.False(t, success)
+}
+
+func TestRename(t *testing.T) {
+	dbPath := t.TempDir()
+	store, _ := NewBadgerStore(dbPath)
+	defer store.Close()
+
+	oldKey := "old_key"
+	newKey := "new_key"
+
+	// 测试String类型
+	store.Set(oldKey, "value")
+	err := store.Rename(oldKey, newKey)
+	assert.NoError(t, err)
+
+	// 验证旧键不存在
+	exists, _ := store.Exists(oldKey)
+	assert.False(t, exists)
+
+	// 验证新键存在
+	val, _ := store.Get(newKey)
+	assert.Equal(t, "value", val)
+
+	// 测试List类型
+	store.LPush("list_old", "value1", "value2")
+	err = store.Rename("list_old", "list_new")
+	assert.NoError(t, err)
+
+	length, _ := store.LLen("list_new")
+	assert.Equal(t, 2, length)
+
+	// 测试Hash类型
+	store.HSet("hash_old", "field", "value")
+	err = store.Rename("hash_old", "hash_new")
+	assert.NoError(t, err)
+
+	valBytes, _ := store.HGet("hash_new", "field")
+	assert.NotNil(t, valBytes)
+
+	// 测试Set类型
+	store.SAdd("set_old", "member1", "member2")
+	err = store.Rename("set_old", "set_new")
+	assert.NoError(t, err)
+
+	count, _ := store.SCard("set_new")
+	assert.Equal(t, uint64(2), count)
+
+	// 测试SortedSet类型
+	store.ZAdd("zset_old", []ZSetMember{
+		{Member: "member1", Score: 1.0},
+		{Member: "member2", Score: 2.0},
+	})
+	err = store.Rename("zset_old", "zset_new")
+	assert.NoError(t, err)
+
+	card, _ := store.ZCard("zset_new")
+	assert.Equal(t, int64(2), card)
+
+	// 测试重命名到已存在的键（应该覆盖）
+	store.Set("key1", "value1")
+	store.Set("key2", "value2")
+	err = store.Rename("key1", "key2")
+	assert.NoError(t, err)
+
+	val, _ = store.Get("key2")
+	assert.Equal(t, "value1", val) // 应该是key1的值
+
+	// 测试不存在的键
+	err = store.Rename("nonexistent", "new_key")
+	assert.Error(t, err)
+}
+
+func TestRenameNX(t *testing.T) {
+	dbPath := t.TempDir()
+	store, _ := NewBadgerStore(dbPath)
+	defer store.Close()
+
+	oldKey := "old_key"
+	newKey := "new_key"
+
+	// 设置旧键
+	store.Set(oldKey, "value")
+
+	// 新键不存在，应该成功
+	success, err := store.RenameNX(oldKey, newKey)
+	assert.NoError(t, err)
+	assert.True(t, success)
+
+	// 验证重命名成功
+	val, _ := store.Get(newKey)
+	assert.Equal(t, "value", val)
+
+	// 再次尝试重命名（新键已存在）
+	store.Set(oldKey, "value2")
+	success, err = store.RenameNX(oldKey, newKey)
+	assert.NoError(t, err)
+	assert.False(t, success)
+
+	// 验证新键值未改变
+	val, _ = store.Get(newKey)
+	assert.Equal(t, "value", val) // 仍然是旧值
+
+	// 测试不存在的键
+	success, err = store.RenameNX("nonexistent", "any_key")
+	assert.NoError(t, err)
+	assert.False(t, success)
+}
+
+func TestKeys(t *testing.T) {
+	dbPath := t.TempDir()
+	store, _ := NewBadgerStore(dbPath)
+	defer store.Close()
+
+	// 创建多个键
+	store.Set("user:1", "value1")
+	store.Set("user:2", "value2")
+	store.Set("order:1", "value3")
+	store.LPush("list:1", "item1")
+	store.HSet("hash:1", "field", "value")
+
+	// 测试匹配所有键
+	keys, err := store.Keys("*")
+	assert.NoError(t, err)
+	assert.True(t, len(keys) >= 5)
+
+	// 测试匹配模式
+	keys, err = store.Keys("user:*")
+	assert.NoError(t, err)
+	assert.Equal(t, 2, len(keys))
+
+	keys, err = store.Keys("order:*")
+	assert.NoError(t, err)
+	assert.Equal(t, 1, len(keys))
+
+	// 测试不匹配的模式
+	keys, err = store.Keys("nonexistent:*")
+	assert.NoError(t, err)
+	assert.Equal(t, 0, len(keys))
+}
+
+func TestScan(t *testing.T) {
+	dbPath := t.TempDir()
+	store, _ := NewBadgerStore(dbPath)
+	defer store.Close()
+
+	// 创建多个键
+	for i := 0; i < 20; i++ {
+		store.Set(fmt.Sprintf("key:%d", i), "value")
+	}
+
+	// 测试SCAN
+	cursor := uint64(0)
+	totalKeys := 0
+	for {
+		result, err := store.Scan(cursor, "*", 5)
+		assert.NoError(t, err)
+		totalKeys += len(result.Keys)
+		if result.Cursor == 0 {
+			break
+		}
+		cursor = result.Cursor
+	}
+	assert.True(t, totalKeys >= 20)
+}
+
+func TestRandomKey(t *testing.T) {
+	dbPath := t.TempDir()
+	store, _ := NewBadgerStore(dbPath)
+	defer store.Close()
+
+	// 空数据库
+	key, err := store.RandomKey()
+	assert.NoError(t, err)
+	assert.Equal(t, "", key)
+
+	// 有键的数据库
+	store.Set("key1", "value1")
+	store.Set("key2", "value2")
+	store.Set("key3", "value3")
+
+	key, err = store.RandomKey()
+	assert.NoError(t, err)
+	assert.True(t, key == "key1" || key == "key2" || key == "key3")
 }

@@ -874,3 +874,371 @@ func (s *BoltreonStore) ZPopMin(zSetName string, count int) ([]ZSetMember, error
 	}
 	return results, nil
 }
+
+// ZUnionStore 实现 Redis ZUNIONSTORE 命令，计算并集并存储到目标集合
+func (s *BoltreonStore) ZUnionStore(destination string, keys []string, weights []float64, aggregate string) (int64, error) {
+	// 先收集所有成员的分数（考虑权重和聚合方式）
+	memberScores := make(map[string]float64)
+
+	for i, key := range keys {
+		weight := 1.0
+		if i < len(weights) && weights[i] != 0 {
+			weight = weights[i]
+		}
+
+		// 获取所有成员
+		members, err := s.ZRange(key, 0, -1)
+		if err != nil {
+			return 0, err
+		}
+
+		for _, member := range members {
+			score := member.Score * weight
+			existingScore, exists := memberScores[member.Member]
+
+			if !exists {
+				memberScores[member.Member] = score
+			} else {
+				// 根据聚合方式计算
+				switch aggregate {
+				case "SUM", "":
+					memberScores[member.Member] = existingScore + score
+				case "MIN":
+					if score < existingScore {
+						memberScores[member.Member] = score
+					}
+				case "MAX":
+					if score > existingScore {
+						memberScores[member.Member] = score
+					}
+				}
+			}
+		}
+	}
+
+	// 删除目标集合的现有数据
+	s.ZSetDel(destination)
+
+	// 添加所有成员到目标集合
+	zsetMembers := make([]ZSetMember, 0, len(memberScores))
+	for member, score := range memberScores {
+		zsetMembers = append(zsetMembers, ZSetMember{Member: member, Score: score})
+	}
+
+	if len(zsetMembers) > 0 {
+		if err := s.ZAdd(destination, zsetMembers); err != nil {
+			return 0, err
+		}
+	}
+
+	return int64(len(memberScores)), nil
+}
+
+// ZInterStore 实现 Redis ZINTERSTORE 命令，计算交集并存储到目标集合
+func (s *BoltreonStore) ZInterStore(destination string, keys []string, weights []float64, aggregate string) (int64, error) {
+	if len(keys) == 0 {
+		// 删除目标集合
+		s.ZSetDel(destination)
+		return 0, nil
+	}
+
+	// 获取第一个集合的所有成员
+	firstMembers, err := s.ZRange(keys[0], 0, -1)
+	if err != nil {
+		return 0, err
+	}
+
+	// 收集所有成员的分数（考虑权重和聚合方式）
+	memberScores := make(map[string]float64)
+	firstWeight := 1.0
+	if len(weights) > 0 && weights[0] != 0 {
+		firstWeight = weights[0]
+	}
+
+	// 初始化第一个集合的成员
+	for _, member := range firstMembers {
+		memberScores[member.Member] = member.Score * firstWeight
+	}
+
+	// 检查每个成员是否在其他所有集合中
+	for i := 1; i < len(keys); i++ {
+		weight := 1.0
+		if i < len(weights) && weights[i] != 0 {
+			weight = weights[i]
+		}
+
+		otherMembers, err := s.ZRange(keys[i], 0, -1)
+		if err != nil {
+			return 0, err
+		}
+
+		otherMemberMap := make(map[string]float64)
+		for _, member := range otherMembers {
+			otherMemberMap[member.Member] = member.Score * weight
+		}
+
+		// 只保留在所有集合中都存在的成员
+		for member := range memberScores {
+			if otherScore, exists := otherMemberMap[member]; exists {
+				// 根据聚合方式更新分数
+				switch aggregate {
+				case "SUM", "":
+					memberScores[member] += otherScore
+				case "MIN":
+					if otherScore < memberScores[member] {
+						memberScores[member] = otherScore
+					}
+				case "MAX":
+					if otherScore > memberScores[member] {
+						memberScores[member] = otherScore
+					}
+				}
+			} else {
+				// 成员不在这个集合中，删除
+				delete(memberScores, member)
+			}
+		}
+	}
+
+	// 删除目标集合的现有数据
+	s.ZSetDel(destination)
+
+	// 添加所有成员到目标集合
+	zsetMembers := make([]ZSetMember, 0, len(memberScores))
+	for member, score := range memberScores {
+		zsetMembers = append(zsetMembers, ZSetMember{Member: member, Score: score})
+	}
+
+	if len(zsetMembers) > 0 {
+		if err := s.ZAdd(destination, zsetMembers); err != nil {
+			return 0, err
+		}
+	}
+
+	return int64(len(memberScores)), nil
+}
+
+// ZDiffStore 实现 Redis ZDIFFSTORE 命令，计算差集并存储到目标集合
+func (s *BoltreonStore) ZDiffStore(destination string, keys []string) (int64, error) {
+	if len(keys) == 0 {
+		// 删除目标集合
+		s.ZSetDel(destination)
+		return 0, nil
+	}
+
+	// 获取第一个集合的所有成员
+	firstMembers, err := s.ZRange(keys[0], 0, -1)
+	if err != nil {
+		return 0, err
+	}
+
+	// 构建其他集合的成员集合
+	otherMembers := make(map[string]bool)
+	for i := 1; i < len(keys); i++ {
+		members, err := s.ZRange(keys[i], 0, -1)
+		if err != nil {
+			return 0, err
+		}
+		for _, member := range members {
+			otherMembers[member.Member] = true
+		}
+	}
+
+	// 找出只在第一个集合中的成员
+	zsetMembers := make([]ZSetMember, 0)
+	for _, member := range firstMembers {
+		if !otherMembers[member.Member] {
+			zsetMembers = append(zsetMembers, ZSetMember{Member: member.Member, Score: member.Score})
+		}
+	}
+
+	// 删除目标集合的现有数据
+	s.ZSetDel(destination)
+
+	// 添加所有成员到目标集合
+	if len(zsetMembers) > 0 {
+		if err := s.ZAdd(destination, zsetMembers); err != nil {
+			return 0, err
+		}
+	}
+
+	return int64(len(zsetMembers)), nil
+}
+
+// ZLexCount 实现 Redis ZLEXCOUNT 命令，计算有序集合中成员值介于min和max之间的成员数量（字典序）
+func (s *BoltreonStore) ZLexCount(zSetName, min, max string) (int64, error) {
+	// 获取所有成员（按分数排序）
+	members, err := s.ZRange(zSetName, 0, -1)
+	if err != nil {
+		return 0, err
+	}
+
+	// 按字典序过滤
+	var count int64
+	for _, member := range members {
+		memberStr := member.Member
+		if compareLex(min, memberStr, true) && compareLex(memberStr, max, false) {
+			count++
+		}
+	}
+	return count, nil
+}
+
+// compareLex 比较两个字符串（字典序），支持开区间和闭区间
+// a是范围边界（如"[a"或"(a"），b是要比较的成员
+// inclusive表示是否包含边界
+func compareLex(a, b string, inclusive bool) bool {
+	if a == "-" {
+		return true // 负无穷，总是包含
+	}
+	if a == "+" {
+		return false // 正无穷，不包含
+	}
+	if b == "-" {
+		return false
+	}
+	if b == "+" {
+		return true
+	}
+
+	// 提取实际的字符串值
+	var aVal string
+	var aInclusive bool
+	if len(a) > 0 {
+		if a[0] == '(' {
+			aVal = a[1:]
+			aInclusive = false
+		} else if a[0] == '[' {
+			aVal = a[1:]
+			aInclusive = true
+		} else {
+			aVal = a
+			aInclusive = inclusive
+		}
+	} else {
+		aVal = a
+		aInclusive = inclusive
+	}
+
+	// 比较
+	if aInclusive {
+		return aVal <= b
+	}
+	return aVal < b
+}
+
+// ZRangeByLex 实现 Redis ZRANGEBYLEX 命令，返回有序集合中成员值介于min和max之间的成员（字典序）
+func (s *BoltreonStore) ZRangeByLex(zSetName, min, max string, offset, count int) ([]string, error) {
+	// 获取所有成员（按分数排序，相同分数按字典序）
+	members, err := s.ZRange(zSetName, 0, -1)
+	if err != nil {
+		return nil, err
+	}
+
+	// 按字典序过滤和排序
+	var filtered []string
+	for _, member := range members {
+		memberStr := member.Member
+		// min <= member <= max
+		minOK := compareLex(min, memberStr, true)
+		// 对于max，需要检查member <= max（如果max是闭区间）或member < max（如果max是开区间）
+		var maxOK bool
+		if max == "+" {
+			maxOK = true
+		} else if len(max) > 0 && max[0] == '(' {
+			// 开区间
+			maxOK = memberStr < max[1:]
+		} else if len(max) > 0 && max[0] == '[' {
+			// 闭区间
+			maxOK = memberStr <= max[1:]
+		} else {
+			maxOK = memberStr <= max
+		}
+		if minOK && maxOK {
+			filtered = append(filtered, memberStr)
+		}
+	}
+
+	// 应用offset和count
+	var results []string
+	if offset < 0 {
+		offset = 0
+	}
+	if offset < len(filtered) {
+		end := offset + count
+		if count <= 0 || end > len(filtered) {
+			end = len(filtered)
+		}
+		results = filtered[offset:end]
+	}
+	return results, nil
+}
+
+// ZRevRangeByLex 实现 Redis ZREVRANGEBYLEX 命令，返回有序集合中成员值介于min和max之间的成员（字典序，反向）
+func (s *BoltreonStore) ZRevRangeByLex(zSetName, max, min string, offset, count int) ([]string, error) {
+	// 先获取正向范围
+	results, err := s.ZRangeByLex(zSetName, min, max, 0, 0)
+	if err != nil {
+		return nil, err
+	}
+
+	// 反转结果
+	for i, j := 0, len(results)-1; i < j; i, j = i+1, j-1 {
+		results[i], results[j] = results[j], results[i]
+	}
+
+	// 应用offset和count
+	if offset < 0 {
+		offset = 0
+	}
+	if offset < len(results) {
+		end := offset + count
+		if count <= 0 || end > len(results) {
+			end = len(results)
+		}
+		results = results[offset:end]
+	} else {
+		results = []string{}
+	}
+
+	return results, nil
+}
+
+// ZRemRangeByLex 实现 Redis ZREMRANGEBYLEX 命令，移除有序集合中成员值介于min和max之间的成员（字典序）
+func (s *BoltreonStore) ZRemRangeByLex(zSetName, min, max string) (int64, error) {
+	var removed int64
+	err := s.db.Update(func(txn *badger.Txn) error {
+		// 获取范围内的成员
+		members, err := s.ZRangeByLex(zSetName, min, max, 0, 0)
+		if err != nil {
+			return err
+		}
+
+		// 删除每个成员
+		for _, member := range members {
+			if err := s.ZRem(zSetName, member); err != nil {
+				return err
+			}
+			removed++
+		}
+		return nil
+	})
+	return removed, err
+}
+
+// ZMScore 实现 Redis ZMSCORE 命令，批量获取多个成员的分数
+func (s *BoltreonStore) ZMScore(zSetName string, members ...string) ([]float64, error) {
+	scores := make([]float64, len(members))
+	for i, member := range members {
+		score, exists, err := s.ZScore(zSetName, member)
+		if err != nil {
+			return nil, err
+		}
+		if exists {
+			scores[i] = score
+		} else {
+			scores[i] = 0 // Redis返回nil，这里用0表示不存在
+		}
+	}
+	return scores, nil
+}

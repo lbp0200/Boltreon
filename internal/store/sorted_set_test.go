@@ -585,3 +585,229 @@ func TestSortedSetOperations(t *testing.T) {
 	card, _ := store.ZCard(zSetName)
 	assert.Equal(t, int64(2), card)
 }
+
+func TestZUnionStore(t *testing.T) {
+	dbPath := t.TempDir()
+	store, _ := NewBadgerStore(dbPath)
+	defer store.Close()
+
+	// 创建两个有序集合
+	store.ZAdd("zset1", []ZSetMember{
+		{Member: "a", Score: 1.0},
+		{Member: "b", Score: 2.0},
+	})
+	store.ZAdd("zset2", []ZSetMember{
+		{Member: "b", Score: 3.0},
+		{Member: "c", Score: 4.0},
+	})
+
+	// 测试并集（默认SUM聚合）
+	count, err := store.ZUnionStore("dest", []string{"zset1", "zset2"}, nil, "")
+	assert.NoError(t, err)
+	assert.Equal(t, int64(3), count)
+
+	// 验证结果
+	members, _ := store.ZRange("dest", 0, -1)
+	assert.Equal(t, 3, len(members))
+	
+	// 验证b的分数是2.0+3.0=5.0
+	score, exists, _ := store.ZScore("dest", "b")
+	assert.True(t, exists)
+	assert.Equal(t, 5.0, score)
+
+	// 测试MIN聚合
+	count, err = store.ZUnionStore("dest2", []string{"zset1", "zset2"}, nil, "MIN")
+	assert.NoError(t, err)
+	assert.Equal(t, int64(3), count)
+	
+	score, exists, _ = store.ZScore("dest2", "b")
+	assert.True(t, exists)
+	assert.Equal(t, 2.0, score) // MIN(2.0, 3.0) = 2.0
+
+	// 测试权重
+	count, err = store.ZUnionStore("dest3", []string{"zset1", "zset2"}, []float64{2.0, 1.0}, "")
+	assert.NoError(t, err)
+	assert.Equal(t, int64(3), count)
+	
+	score, exists, _ = store.ZScore("dest3", "a")
+	assert.True(t, exists)
+	assert.Equal(t, 2.0, score) // 1.0 * 2.0 = 2.0
+}
+
+func TestZInterStore(t *testing.T) {
+	dbPath := t.TempDir()
+	store, _ := NewBadgerStore(dbPath)
+	defer store.Close()
+
+	// 创建两个有序集合
+	store.ZAdd("zset1", []ZSetMember{
+		{Member: "a", Score: 1.0},
+		{Member: "b", Score: 2.0},
+	})
+	store.ZAdd("zset2", []ZSetMember{
+		{Member: "b", Score: 3.0},
+		{Member: "c", Score: 4.0},
+	})
+
+	// 测试交集（默认SUM聚合）
+	count, err := store.ZInterStore("dest", []string{"zset1", "zset2"}, nil, "")
+	assert.NoError(t, err)
+	assert.Equal(t, int64(1), count)
+
+	// 验证结果
+	members, _ := store.ZRange("dest", 0, -1)
+	assert.Equal(t, 1, len(members))
+	assert.Equal(t, "b", members[0].Member)
+	
+	// 验证b的分数是2.0+3.0=5.0
+	score, exists, _ := store.ZScore("dest", "b")
+	assert.True(t, exists)
+	assert.Equal(t, 5.0, score)
+}
+
+func TestZDiffStore(t *testing.T) {
+	dbPath := t.TempDir()
+	store, _ := NewBadgerStore(dbPath)
+	defer store.Close()
+
+	// 创建两个有序集合
+	store.ZAdd("zset1", []ZSetMember{
+		{Member: "a", Score: 1.0},
+		{Member: "b", Score: 2.0},
+		{Member: "c", Score: 3.0},
+	})
+	store.ZAdd("zset2", []ZSetMember{
+		{Member: "b", Score: 2.0},
+		{Member: "c", Score: 3.0},
+	})
+
+	// 测试差集
+	count, err := store.ZDiffStore("dest", []string{"zset1", "zset2"})
+	assert.NoError(t, err)
+	assert.Equal(t, int64(1), count)
+
+	// 验证结果
+	members, _ := store.ZRange("dest", 0, -1)
+	assert.Equal(t, 1, len(members))
+	assert.Equal(t, "a", members[0].Member)
+}
+
+func TestZLexCount(t *testing.T) {
+	dbPath := t.TempDir()
+	store, _ := NewBadgerStore(dbPath)
+	defer store.Close()
+
+	// 创建有序集合（相同分数，按字典序）
+	store.ZAdd("zset", []ZSetMember{
+		{Member: "a", Score: 1.0},
+		{Member: "b", Score: 1.0},
+		{Member: "c", Score: 1.0},
+		{Member: "d", Score: 1.0},
+	})
+
+	// 测试范围计数
+	count, err := store.ZLexCount("zset", "[a", "[c")
+	assert.NoError(t, err)
+	assert.Equal(t, int64(3), count) // a, b, c
+
+	count, err = store.ZLexCount("zset", "(a", "(c")
+	assert.NoError(t, err)
+	assert.Equal(t, int64(1), count) // b
+}
+
+func TestZRangeByLex(t *testing.T) {
+	dbPath := t.TempDir()
+	store, _ := NewBadgerStore(dbPath)
+	defer store.Close()
+
+	// 创建有序集合（相同分数，按字典序）
+	store.ZAdd("zset", []ZSetMember{
+		{Member: "a", Score: 1.0},
+		{Member: "b", Score: 1.0},
+		{Member: "c", Score: 1.0},
+		{Member: "d", Score: 1.0},
+	})
+
+	// 测试范围查询
+	members, err := store.ZRangeByLex("zset", "[a", "[c", 0, 0)
+	assert.NoError(t, err)
+	assert.Equal(t, 3, len(members))
+	assert.Equal(t, "a", members[0])
+	assert.Equal(t, "b", members[1])
+	assert.Equal(t, "c", members[2])
+
+	// 测试offset和count
+	members, err = store.ZRangeByLex("zset", "[a", "[d", 1, 2)
+	assert.NoError(t, err)
+	assert.Equal(t, 2, len(members))
+	assert.Equal(t, "b", members[0])
+	assert.Equal(t, "c", members[1])
+}
+
+func TestZRevRangeByLex(t *testing.T) {
+	dbPath := t.TempDir()
+	store, _ := NewBadgerStore(dbPath)
+	defer store.Close()
+
+	// 创建有序集合
+	store.ZAdd("zset", []ZSetMember{
+		{Member: "a", Score: 1.0},
+		{Member: "b", Score: 1.0},
+		{Member: "c", Score: 1.0},
+	})
+
+	// 测试反向范围查询
+	members, err := store.ZRevRangeByLex("zset", "[c", "[a", 0, 0)
+	assert.NoError(t, err)
+	assert.Equal(t, 3, len(members))
+	assert.Equal(t, "c", members[0])
+	assert.Equal(t, "b", members[1])
+	assert.Equal(t, "a", members[2])
+}
+
+func TestZRemRangeByLex(t *testing.T) {
+	dbPath := t.TempDir()
+	store, _ := NewBadgerStore(dbPath)
+	defer store.Close()
+
+	// 创建有序集合
+	store.ZAdd("zset", []ZSetMember{
+		{Member: "a", Score: 1.0},
+		{Member: "b", Score: 1.0},
+		{Member: "c", Score: 1.0},
+		{Member: "d", Score: 1.0},
+	})
+
+	// 删除范围内的成员
+	removed, err := store.ZRemRangeByLex("zset", "[b", "[c")
+	assert.NoError(t, err)
+	assert.Equal(t, int64(2), removed) // b, c
+
+	// 验证结果
+	members, _ := store.ZRange("zset", 0, -1)
+	assert.Equal(t, 2, len(members))
+	assert.Equal(t, "a", members[0].Member)
+	assert.Equal(t, "d", members[1].Member)
+}
+
+func TestZMScore(t *testing.T) {
+	dbPath := t.TempDir()
+	store, _ := NewBadgerStore(dbPath)
+	defer store.Close()
+
+	// 创建有序集合
+	store.ZAdd("zset", []ZSetMember{
+		{Member: "a", Score: 1.0},
+		{Member: "b", Score: 2.0},
+		{Member: "c", Score: 3.0},
+	})
+
+	// 测试批量获取分数
+	scores, err := store.ZMScore("zset", "a", "b", "nonexistent", "c")
+	assert.NoError(t, err)
+	assert.Equal(t, 4, len(scores))
+	assert.Equal(t, 1.0, scores[0])
+	assert.Equal(t, 2.0, scores[1])
+	assert.Equal(t, 0.0, scores[2]) // 不存在的成员
+	assert.Equal(t, 3.0, scores[3])
+}

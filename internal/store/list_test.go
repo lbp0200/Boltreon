@@ -401,3 +401,107 @@ func TestListEdgeCases(t *testing.T) {
 	length, _ = store.LLen(key)
 	assert.Equal(t, uint64(100), length)
 }
+
+func TestLPUSHX(t *testing.T) {
+	dbPath := t.TempDir()
+	store, _ := NewBadgerStore(dbPath)
+	defer store.Close()
+
+	key := "test_lpushx"
+
+	// 键不存在，应该返回0
+	count, err := store.LPUSHX(key, "value1")
+	assert.NoError(t, err)
+	assert.Equal(t, 0, count)
+
+	// 创建列表
+	store.LPush(key, "existing")
+
+	// 键存在，应该成功
+	count, err = store.LPUSHX(key, "value1", "value2")
+	assert.NoError(t, err)
+	assert.Equal(t, 2, count)
+
+	// 验证值
+	val, _ := store.LIndex(key, 0)
+	assert.Equal(t, "value2", val)
+}
+
+func TestRPUSHX(t *testing.T) {
+	dbPath := t.TempDir()
+	store, _ := NewBadgerStore(dbPath)
+	defer store.Close()
+
+	key := "test_rpushx"
+
+	// 键不存在，应该返回0
+	count, err := store.RPUSHX(key, "value1")
+	assert.NoError(t, err)
+	assert.Equal(t, 0, count)
+
+	// 创建列表
+	store.RPush(key, "existing")
+
+	// 键存在，应该成功
+	count, err = store.RPUSHX(key, "value1", "value2")
+	assert.NoError(t, err)
+	assert.Equal(t, 2, count)
+
+	// 验证值
+	val, _ := store.LIndex(key, 2)
+	assert.Equal(t, "value2", val)
+}
+
+func TestBLPOP(t *testing.T) {
+	dbPath := t.TempDir()
+	store, _ := NewBadgerStore(dbPath)
+	defer store.Close()
+
+	// 测试非空列表
+	store.LPush("list1", "value1")
+	key, value, err := store.BLPOP([]string{"list1", "list2"}, 0)
+	assert.NoError(t, err)
+	assert.Equal(t, "list1", key)
+	assert.Equal(t, "value1", value)
+
+	// 测试空列表
+	key, value, err = store.BLPOP([]string{"empty_list"}, 0)
+	assert.NoError(t, err)
+	assert.Equal(t, "", key)
+	assert.Equal(t, "", value)
+}
+
+func TestBRPOP(t *testing.T) {
+	dbPath := t.TempDir()
+	store, _ := NewBadgerStore(dbPath)
+	defer store.Close()
+
+	// 测试非空列表
+	store.RPush("list1", "value1")
+	key, value, err := store.BRPOP([]string{"list1", "list2"}, 0)
+	assert.NoError(t, err)
+	assert.Equal(t, "list1", key)
+	assert.Equal(t, "value1", value)
+
+	// 测试空列表
+	key, value, err = store.BRPOP([]string{"empty_list"}, 0)
+	assert.NoError(t, err)
+	assert.Equal(t, "", key)
+	assert.Equal(t, "", value)
+}
+
+func TestBRPOPLPUSH(t *testing.T) {
+	dbPath := t.TempDir()
+	store, _ := NewBadgerStore(dbPath)
+	defer store.Close()
+
+	// 测试非空列表
+	store.RPush("source", "value1")
+	value, err := store.BRPOPLPUSH("source", "dest", 0)
+	assert.NoError(t, err)
+	assert.Equal(t, "value1", value)
+
+	// 验证值已移动
+	val, _ := store.LIndex("dest", 0)
+	assert.Equal(t, "value1", val)
+}

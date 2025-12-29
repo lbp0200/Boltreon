@@ -1032,3 +1032,152 @@ func (s *BoltreonStore) RPopLPush(source, destination string) (string, error) {
 	})
 	return value, err
 }
+
+// LPUSHX 实现 Redis LPUSHX 命令，仅当键存在时左推入
+func (s *BoltreonStore) LPUSHX(key string, values ...string) (int, error) {
+	var count int
+	err := s.db.Update(func(txn *badger.Txn) error {
+		// 检查键是否存在
+		typeKey := TypeOfKeyGet(key)
+		item, err := txn.Get(typeKey)
+		if errors.Is(err, badger.ErrKeyNotFound) {
+			return nil // 键不存在，返回0
+		}
+		if err != nil {
+			return err
+		}
+
+		val, err := item.ValueCopy(nil)
+		if err != nil {
+			return err
+		}
+
+		keyType := string(val)
+		if keyType != KeyTypeList {
+			return nil // 不是List类型，返回0
+		}
+
+		// 键存在且是List类型，执行LPUSH
+		length, start, end, err := s.listGetMeta(key)
+		if err != nil {
+			return err
+		}
+
+		// 执行LPUSH逻辑
+		for _, value := range values {
+			nodeID, err := s.createNode(txn, key, []byte(value))
+			if err != nil {
+				return err
+			}
+
+			if length == 0 {
+				// 空列表
+				start = nodeID
+				end = nodeID
+			} else {
+				// 链接到头部
+				if err := s.linkNodes(txn, key, nodeID, start); err != nil {
+					return err
+				}
+				start = nodeID
+			}
+			length++
+			count++
+		}
+
+		// 更新元数据
+		return s.listUpdateMeta(txn, key, length, start, end)
+	})
+	return count, err
+}
+
+// RPUSHX 实现 Redis RPUSHX 命令，仅当键存在时右推入
+func (s *BoltreonStore) RPUSHX(key string, values ...string) (int, error) {
+	var count int
+	err := s.db.Update(func(txn *badger.Txn) error {
+		// 检查键是否存在
+		typeKey := TypeOfKeyGet(key)
+		item, err := txn.Get(typeKey)
+		if errors.Is(err, badger.ErrKeyNotFound) {
+			return nil // 键不存在，返回0
+		}
+		if err != nil {
+			return err
+		}
+
+		val, err := item.ValueCopy(nil)
+		if err != nil {
+			return err
+		}
+
+		keyType := string(val)
+		if keyType != KeyTypeList {
+			return nil // 不是List类型，返回0
+		}
+
+		// 键存在且是List类型，执行RPUSH
+		length, start, end, err := s.listGetMeta(key)
+		if err != nil {
+			return err
+		}
+
+		// 执行RPUSH逻辑
+		for _, value := range values {
+			nodeID, err := s.createNode(txn, key, []byte(value))
+			if err != nil {
+				return err
+			}
+
+			if length == 0 {
+				// 空列表
+				start = nodeID
+				end = nodeID
+			} else {
+				// 链接到尾部
+				if err := s.linkNodes(txn, key, end, nodeID); err != nil {
+					return err
+				}
+				end = nodeID
+			}
+			length++
+			count++
+		}
+
+		// 更新元数据
+		return s.listUpdateMeta(txn, key, length, start, end)
+	})
+	return count, err
+}
+
+// BLPOP 实现 Redis BLPOP 命令，阻塞式左弹出（简化版本：非阻塞）
+// 注意：真正的阻塞操作需要额外的机制（如channel或条件变量），这里实现非阻塞版本
+func (s *BoltreonStore) BLPOP(keys []string, timeout int) (string, string, error) {
+	// 简化实现：立即尝试从每个键弹出
+	for _, key := range keys {
+		value, err := s.LPop(key)
+		if err == nil && value != "" {
+			return key, value, nil
+		}
+	}
+	// 所有键都为空，返回空结果
+	return "", "", nil
+}
+
+// BRPOP 实现 Redis BRPOP 命令，阻塞式右弹出（简化版本：非阻塞）
+func (s *BoltreonStore) BRPOP(keys []string, timeout int) (string, string, error) {
+	// 简化实现：立即尝试从每个键弹出
+	for _, key := range keys {
+		value, err := s.RPop(key)
+		if err == nil && value != "" {
+			return key, value, nil
+		}
+	}
+	// 所有键都为空，返回空结果
+	return "", "", nil
+}
+
+// BRPOPLPUSH 实现 Redis BRPOPLPUSH 命令，阻塞式右弹出并左推入（简化版本：非阻塞）
+func (s *BoltreonStore) BRPOPLPUSH(source, destination string, timeout int) (string, error) {
+	// 简化实现：立即尝试执行RPOPLPUSH
+	return s.RPopLPush(source, destination)
+}
