@@ -32,9 +32,32 @@ import (
 // 修改 HSet 维护计数器
 func (s *BoltreonStore) HSet(key, field string, value interface{}) error {
 	logFuncTag := "BoltreonStoreHSet"
-	bValue, err := helper.InterfaceToBytes(value)
-	if err != nil {
-		return fmt.Errorf("%s,%v", logFuncTag, err)
+	// 将值转换为字符串（与Redis一致，Hash值都是字符串）
+	var bValue []byte
+	switch v := value.(type) {
+	case string:
+		bValue = []byte(v)
+	case []byte:
+		bValue = v
+	case int, int8, int16, int32, int64:
+		bValue = []byte(fmt.Sprintf("%d", v))
+	case uint, uint8, uint16, uint32, uint64:
+		bValue = []byte(fmt.Sprintf("%d", v))
+	case float32, float64:
+		bValue = []byte(fmt.Sprintf("%g", v))
+	case bool:
+		if v {
+			bValue = []byte("1")
+		} else {
+			bValue = []byte("0")
+		}
+	default:
+		// 对于其他类型，使用gob编码（向后兼容）
+		var err error
+		bValue, err = helper.InterfaceToBytes(value)
+		if err != nil {
+			return fmt.Errorf("%s,%v", logFuncTag, err)
+		}
 	}
 	hkey := s.hashKey(key, field)
 	typeKey := TypeOfKeyGet(key)
@@ -190,13 +213,26 @@ func (s *BoltreonStore) HGetAll(key string) (map[string][]byte, error) {
 	return result, err
 }
 
-// splitHashKey 从哈希键中解析出字段名
+// splitHashKey 从哈希键中解析出key和field
+// 键格式: HASH:key:field
+// 例如: HASH:user:1:name -> key="user:1", field="name"
 func splitHashKey(key []byte) (string, string) {
-	parts := strings.SplitN(string(key), ":", 3)
-	if len(parts) >= 3 {
-		return parts[1], parts[2]
+	keyStr := string(key)
+	// 去掉前缀 "HASH:"
+	prefix := KeyTypeHash + ":"
+	if !strings.HasPrefix(keyStr, prefix) {
+		return "", ""
 	}
-	return "", ""
+	// 获取剩余部分: "user:1:name"
+	remainder := keyStr[len(prefix):]
+	// 找到最后一个冒号，前面是key，后面是field
+	lastColon := strings.LastIndex(remainder, ":")
+	if lastColon == -1 {
+		return "", ""
+	}
+	hashKey := remainder[:lastColon]
+	field := remainder[lastColon+1:]
+	return hashKey, field
 }
 
 // getAllHashFields 获取哈希表中的所有字段
@@ -301,9 +337,32 @@ func (s *BoltreonStore) HMSet(key string, fieldValues map[string]interface{}) er
 
 		newFields := 0
 		for field, value := range fieldValues {
-			bValue, err := helper.InterfaceToBytes(value)
-			if err != nil {
-				return fmt.Errorf("HMSet: failed to convert value for field %s: %v", field, err)
+			// 将值转换为字符串（与Redis一致）
+			var bValue []byte
+			switch v := value.(type) {
+			case string:
+				bValue = []byte(v)
+			case []byte:
+				bValue = v
+			case int, int8, int16, int32, int64:
+				bValue = []byte(fmt.Sprintf("%d", v))
+			case uint, uint8, uint16, uint32, uint64:
+				bValue = []byte(fmt.Sprintf("%d", v))
+			case float32, float64:
+				bValue = []byte(fmt.Sprintf("%g", v))
+			case bool:
+				if v {
+					bValue = []byte("1")
+				} else {
+					bValue = []byte("0")
+				}
+			default:
+				// 对于其他类型，使用gob编码（向后兼容）
+				var err error
+				bValue, err = helper.InterfaceToBytes(value)
+				if err != nil {
+					return fmt.Errorf("HMSet: failed to convert value for field %s: %v", field, err)
+				}
 			}
 			hkey := s.hashKey(key, field)
 
@@ -346,7 +405,7 @@ func (s *BoltreonStore) HMGet(key string, fields ...string) ([][]byte, error) {
 			if err != nil {
 				return err
 			}
-			val, err := item.ValueCopy(nil)
+			val, err := s.getValueWithDecompression(item)
 			if err != nil {
 				return err
 			}
@@ -361,19 +420,43 @@ func (s *BoltreonStore) HMGet(key string, fields ...string) ([][]byte, error) {
 func (s *BoltreonStore) HSetNX(key, field string, value interface{}) (bool, error) {
 	success := false
 	typeKey := TypeOfKeyGet(key)
-	bValue, err := helper.InterfaceToBytes(value)
-	if err != nil {
-		return false, fmt.Errorf("HSetNX: failed to convert value: %v", err)
+	// 将值转换为字符串（与Redis一致）
+	var bValue []byte
+	switch v := value.(type) {
+	case string:
+		bValue = []byte(v)
+	case []byte:
+		bValue = v
+	case int, int8, int16, int32, int64:
+		bValue = []byte(fmt.Sprintf("%d", v))
+	case uint, uint8, uint16, uint32, uint64:
+		bValue = []byte(fmt.Sprintf("%d", v))
+	case float32, float64:
+		bValue = []byte(fmt.Sprintf("%g", v))
+	case bool:
+		if v {
+			bValue = []byte("1")
+		} else {
+			bValue = []byte("0")
+		}
+	default:
+		// 对于其他类型，使用gob编码（向后兼容）
+		var err error
+		bValue, err = helper.InterfaceToBytes(value)
+		if err != nil {
+			return false, fmt.Errorf("HSetNX: failed to convert value: %v", err)
+		}
 	}
 	hkey := s.hashKey(key, field)
-	err = s.db.Update(func(txn *badger.Txn) error {
+	err := s.db.Update(func(txn *badger.Txn) error {
 		// 检查字段是否存在
-		if _, err := txn.Get(hkey); err == nil {
+		_, getErr := txn.Get(hkey)
+		if getErr == nil {
 			// 字段已存在，不设置
 			return nil
 		}
-		if !errors.Is(err, badger.ErrKeyNotFound) {
-			return err
+		if !errors.Is(getErr, badger.ErrKeyNotFound) {
+			return getErr
 		}
 
 		// 字段不存在，设置它（带压缩）
