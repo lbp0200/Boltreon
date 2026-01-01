@@ -24,11 +24,14 @@ func (a *Array) String() string {
 
 type BulkString []byte
 
-func (b BulkString) String() string {
+func (b *BulkString) String() string {
 	if b == nil {
 		return "$-1\r\n"
 	}
-	return "$" + strconv.Itoa(len(b)) + "\r\n" + string(b) + "\r\n"
+	if *b == nil {
+		return "$-1\r\n"
+	}
+	return "$" + strconv.Itoa(len(*b)) + "\r\n" + string(*b) + "\r\n"
 }
 
 type SimpleString string
@@ -139,20 +142,31 @@ func readBulkString(r *bufio.Reader) ([]byte, error) {
 func joinBulkStrings(args [][]byte) string {
 	var b strings.Builder
 	for _, arg := range args {
-		b.WriteString("$")
-		b.WriteString(strconv.Itoa(len(arg)))
-		b.WriteString("\r\n")
-		b.Write(arg)
-		b.WriteString("\r\n")
+		if arg == nil {
+			b.WriteString("$-1\r\n")
+		} else {
+			b.WriteString("$")
+			b.WriteString(strconv.Itoa(len(arg)))
+			b.WriteString("\r\n")
+			b.Write(arg)
+			b.WriteString("\r\n")
+		}
 	}
 	return b.String()
 }
 
 // 工厂
 func NewSimpleString(s string) RESP { r := SimpleString(s); return &r }
-func NewBulkString(b []byte) RESP   { r := BulkString(b); return &r }
-func NewError(e string) RESP        { r := Error(e); return &r }
-func NewInteger(i int64) RESP       { r := Integer(i); return &r }
+func NewBulkString(b []byte) RESP {
+	if b == nil {
+		var r *BulkString
+		return r
+	}
+	r := BulkString(b)
+	return &r
+}
+func NewError(e string) RESP  { r := Error(e); return &r }
+func NewInteger(i int64) RESP { r := Integer(i); return &r }
 
 var (
 	OK = NewSimpleString("OK")

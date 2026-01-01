@@ -150,6 +150,7 @@ func (s *BoltreonStore) linkNodes(txn *badger.Txn, key string, prevID, nextID st
 
 // LPush Redis LPUSH 实现
 func (s *BoltreonStore) LPush(key string, values ...string) (int, error) {
+	var finalLength uint64
 	err := s.db.Update(func(txn *badger.Txn) error {
 		if err := txn.Set(TypeOfKeyGet(key), []byte(KeyTypeList)); err != nil {
 			return err
@@ -184,9 +185,10 @@ func (s *BoltreonStore) LPush(key string, values ...string) (int, error) {
 		}
 
 		// 更新元数据
+		finalLength = length
 		return s.listUpdateMeta(txn, key, length, start, end)
 	})
-	return len(values), err // 返回添加的元素数量
+	return int(finalLength), err // 返回操作后列表的长度（Redis规范）
 }
 
 // RPOP 实现
@@ -331,7 +333,7 @@ func (s *BoltreonStore) getNodeByIndex(txn *badger.Txn, key string, index int64)
 
 // RPUSH 实现 Redis RPUSH 命令
 func (s *BoltreonStore) RPush(key string, values ...string) (int, error) {
-	count := 0
+	var finalLength uint64
 	err := s.db.Update(func(txn *badger.Txn) error {
 		if err := txn.Set(TypeOfKeyGet(key), []byte(KeyTypeList)); err != nil {
 			return err
@@ -363,13 +365,13 @@ func (s *BoltreonStore) RPush(key string, values ...string) (int, error) {
 				end = nodeID
 			}
 			length++
-			count++
 		}
 
 		// 更新元数据
+		finalLength = length
 		return s.listUpdateMeta(txn, key, length, start, end)
 	})
-	return len(values), err // 返回添加的元素数量
+	return int(finalLength), err // 返回操作后列表的长度（Redis规范）
 }
 
 // LPOP 实现 Redis LPOP 命令

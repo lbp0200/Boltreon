@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -96,6 +97,7 @@ func TestStringCommands(t *testing.T) {
 
 	// GET不存在的键
 	val, err = testClient.Get(ctx, "nonexistent").Result()
+	t.Logf("val: %s, err: %v, type: %T, isNil: %v", val, err, err, errors.Is(err, redis.Nil))
 	assert.Error(t, err)
 	assert.Equal(t, redis.Nil, err)
 

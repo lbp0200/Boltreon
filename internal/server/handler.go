@@ -2,6 +2,7 @@ package server
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"net"
 	"strconv"
@@ -54,7 +55,7 @@ func (h *Handler) executeCommand(cmd string, args [][]byte) proto.RESP {
 	switch cmd {
 	// 连接命令
 	case "PING":
-		return proto.OK
+		return proto.NewSimpleString("PONG")
 
 	// String命令
 	case "SET":
@@ -74,7 +75,10 @@ func (h *Handler) executeCommand(cmd string, args [][]byte) proto.RESP {
 		key := string(args[0])
 		value, err := h.Db.Get(key)
 		if err != nil {
-			return proto.NewBulkString(nil)
+			if errors.Is(err, store.ErrKeyNotFound) {
+				return proto.NewBulkString(nil)
+			}
+			return proto.NewError(fmt.Sprintf("ERR %v", err))
 		}
 		return proto.NewBulkString([]byte(value))
 
@@ -1231,13 +1235,26 @@ func (h *Handler) executeCommand(cmd string, args [][]byte) proto.RESP {
 		if err1 != nil || err2 != nil {
 			return proto.NewError("ERR value is not an integer or out of range")
 		}
+		// 检查是否有 WITHSCORES 选项
+		withScores := false
+		if len(args) >= 4 && strings.ToUpper(string(args[3])) == "WITHSCORES" {
+			withScores = true
+		}
 		members, err := h.Db.ZRange(key, start, stop)
 		if err != nil {
 			return &proto.Array{Args: [][]byte{}}
 		}
-		results := make([][]byte, 0, len(members)*2)
-		for _, m := range members {
-			results = append(results, []byte(m.Member), []byte(fmt.Sprintf("%.10g", m.Score)))
+		results := make([][]byte, 0)
+		if withScores {
+			// 有 WITHSCORES：返回 member 和 score 的交替数组
+			for _, m := range members {
+				results = append(results, []byte(m.Member), []byte(fmt.Sprintf("%.10g", m.Score)))
+			}
+		} else {
+			// 没有 WITHSCORES：只返回 member 列表
+			for _, m := range members {
+				results = append(results, []byte(m.Member))
+			}
 		}
 		return &proto.Array{Args: results}
 
@@ -1251,13 +1268,26 @@ func (h *Handler) executeCommand(cmd string, args [][]byte) proto.RESP {
 		if err1 != nil || err2 != nil {
 			return proto.NewError("ERR value is not an integer or out of range")
 		}
+		// 检查是否有 WITHSCORES 选项
+		withScores := false
+		if len(args) >= 4 && strings.ToUpper(string(args[3])) == "WITHSCORES" {
+			withScores = true
+		}
 		members, err := h.Db.ZRevRange(key, start, stop)
 		if err != nil {
 			return &proto.Array{Args: [][]byte{}}
 		}
-		results := make([][]byte, 0, len(members)*2)
-		for _, m := range members {
-			results = append(results, []byte(m.Member), []byte(fmt.Sprintf("%.10g", m.Score)))
+		results := make([][]byte, 0)
+		if withScores {
+			// 有 WITHSCORES：返回 member 和 score 的交替数组
+			for _, m := range members {
+				results = append(results, []byte(m.Member), []byte(fmt.Sprintf("%.10g", m.Score)))
+			}
+		} else {
+			// 没有 WITHSCORES：只返回 member 列表
+			for _, m := range members {
+				results = append(results, []byte(m.Member))
+			}
 		}
 		return &proto.Array{Args: results}
 

@@ -419,13 +419,22 @@ func (s *BoltreonStore) ZRange(zSetName string, start, stop int64) ([]*ZSetMembe
 			item := it.Item()
 			key := item.Key()
 
-			parts := bytes.Split(key[len(prefixKeySortedSetBytes):], []byte(UnderScore))
-			if len(parts) < 2 {
+			// 键格式: zset:zSetName:index:scoreBytes:member:versionBytes
+			// 去掉前缀 "zset:"
+			keyWithoutPrefix := key[len(prefixKeySortedSetBytes):]
+			// 格式: zSetName:index:scoreBytes:member:versionBytes
+			keyParts := bytes.Split(keyWithoutPrefix, []byte(":"))
+			if len(keyParts) < 5 {
 				log.Printf("ZRange: Invalid key format: %s", key)
 				continue
 			}
-			member := string(parts[1][:len(parts[1])-4]) // 去掉版本号
-			scoreBytes := key[len(prefixKeySortedSetBytes)+len(zSetName)+len(sortedSetIndex) : len(key)-len(UnderScore+member)-4]
+			// keyParts[0] = zSetName
+			// keyParts[1] = "index"
+			// keyParts[2] = scoreBytes (8 bytes)
+			// keyParts[3] = member
+			// keyParts[4] = versionBytes (4 bytes)
+			scoreBytes := keyParts[2]
+			member := string(keyParts[3])
 			if len(scoreBytes) != 8 {
 				log.Printf("ZRange: Invalid score bytes length: %d", len(scoreBytes))
 				continue

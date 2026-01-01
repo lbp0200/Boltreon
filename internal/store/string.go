@@ -10,6 +10,9 @@ import (
 	"github.com/dgraph-io/badger/v4"
 )
 
+// ErrKeyNotFound 表示键不存在
+var ErrKeyNotFound = errors.New("key not found")
+
 // stringKey 方法用于生成存储在 Badger 数据库中的键
 func (s *BoltreonStore) stringKey(key string) string {
 	return fmt.Sprintf("%s:%s", KeyTypeString, key)
@@ -190,17 +193,20 @@ func (s *BoltreonStore) Get(key string) (string, error) {
 		item, err := txn.Get([]byte(strKey))
 		if err != nil {
 			if errors.Is(err, badger.ErrKeyNotFound) {
-				return nil // 返回 nil 表示键不存在
+				return ErrKeyNotFound // 返回特定错误表示键不存在
 			}
 			return err
 		}
-		v, err := item.ValueCopy(nil)
+		valBytes, err := s.getValueWithDecompression(item)
 		if err != nil {
 			return err
 		}
-		val = string(v)
+		val = string(valBytes)
 		return nil
 	})
+	if errors.Is(err, ErrKeyNotFound) {
+		return "", ErrKeyNotFound
+	}
 	return val, err
 }
 
