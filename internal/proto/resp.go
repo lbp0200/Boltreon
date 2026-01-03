@@ -8,6 +8,8 @@ import (
 	"io"
 	"strconv"
 	"strings"
+
+	"github.com/lbp0200/Boltreon/internal/logger"
 )
 
 type RESP interface {
@@ -49,12 +51,19 @@ func (i Integer) String() string { return ":" + strconv.FormatInt(int64(i), 10) 
 func ReadRESP(r *bufio.Reader) (*Array, error) {
 	line, err := readLine(r)
 	if err != nil {
+		logger.Logger.Debug().Err(err).Msg("ReadRESP readLine 失败")
 		return nil, err
 	}
 
 	if len(line) == 0 {
+		logger.Logger.Debug().Msg("ReadRESP 收到空行")
 		return nil, fmt.Errorf("empty line")
 	}
+
+	logger.Logger.Debug().
+		Str("line", string(line)).
+		Str("type", string(line[0])).
+		Msg("ReadRESP 读取到")
 
 	switch line[0] {
 	case '*': // Array
@@ -93,13 +102,97 @@ func ReadRESP(r *bufio.Reader) (*Array, error) {
 			args[i] = data[:bulkLen] // 去掉 \r\n
 		}
 		return &Array{Args: args}, nil
+	case '+': // Simple String (用于响应，如 PING 返回 PONG)
+		// line 已经是 "+PONG" 格式，readLine 已经去掉了 \r\n
+		// 所以 line[1:] 就是内容
+		// 不需要再次调用 readLine，因为 readLine 已经读取了整行
+		if len(line) < 2 {
+			return nil, fmt.Errorf("invalid simple string format")
+		}
+		// 将简单字符串转换为单元素数组
+		return &Array{Args: [][]byte{line[1:]}}, nil
+	case '$': // Bulk String (单独发送，redis-benchmark 不使用)
+		// 这不应该出现在命令中，但为了健壮性处理
+		bulkLen, err := strconv.Atoi(string(line[1:]))
+		if err != nil || bulkLen < -1 {
+			return nil, fmt.Errorf("invalid bulk string length: %s", line[1:])
+		}
+		if bulkLen == -1 {
+			return nil, fmt.Errorf("null bulk string not supported as command")
+		}
+		data := make([]byte, bulkLen+2)
+		_, err = io.ReadFull(r, data)
+		if err != nil {
+			return nil, err
+		}
+		return &Array{Args: [][]byte{data[:bulkLen]}}, nil
+	default:
+		// 内联命令格式（Inline Command）
+		// Redis 支持内联命令，格式为: "PING\r\n" 或 "GET key\r\n"
+		// 命令和参数用空格分隔，以 \r\n 结尾
+		// readLine 已经去掉了 \r\n，所以 line 就是完整的命令
+		return parseInlineCommand(line)
 	}
-	return nil, fmt.Errorf("unsupported RESP type: %c", line[0])
+}
+
+// parseInlineCommand 解析内联命令
+// 内联命令格式: "PING" 或 "GET key" 或 "SET key value"
+// 参数用空格分隔
+func parseInlineCommand(line []byte) (*Array, error) {
+	// 将字节数组转换为字符串，然后按空格分割
+	cmdStr := strings.TrimSpace(string(line))
+	if cmdStr == "" {
+		return nil, fmt.Errorf("empty inline command")
+	}
+
+	// 按空格分割命令和参数
+	// 注意：Redis 内联命令中，参数中的空格需要用引号包裹，但大多数客户端不使用这个特性
+	parts := strings.Fields(cmdStr)
+	if len(parts) == 0 {
+		return nil, fmt.Errorf("empty inline command")
+	}
+
+	// 转换为字节数组
+	args := make([][]byte, len(parts))
+	for i, part := range parts {
+		args[i] = []byte(part)
+	}
+
+	logger.Logger.Debug().
+		Str("inline_command", cmdStr).
+		Int("arg_count", len(args)).
+		Msg("解析内联命令")
+
+	return &Array{Args: args}, nil
 }
 
 func WriteRESP(w io.Writer, resp RESP) error {
-	_, err := fmt.Fprint(w, resp.String())
-	return err
+	respStr := resp.String()
+	logger.Logger.Debug().
+		Str("response", truncateString(respStr, 100)).
+		Msg("WriteRESP 写入响应")
+	_, err := fmt.Fprint(w, respStr)
+	if err != nil {
+		logger.Logger.Warn().Err(err).Msg("WriteRESP 写入失败")
+		return err
+	}
+	// 如果是 net.Conn，尝试刷新缓冲区
+	if conn, ok := w.(interface{ Flush() error }); ok {
+		if err := conn.Flush(); err != nil {
+			logger.Logger.Warn().Err(err).Msg("WriteRESP 刷新失败")
+			return err
+		}
+		logger.Logger.Debug().Msg("WriteRESP 刷新成功")
+	}
+	return nil
+}
+
+// truncateString 截断字符串用于日志显示
+func truncateString(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
 }
 
 // helpers

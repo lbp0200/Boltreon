@@ -10,6 +10,39 @@ import (
 	"github.com/lbp0200/Boltreon/internal/helper"
 )
 
+// retryUpdate 重试执行 BadgerDB Update 操作，处理事务冲突
+func (s *BoltreonStore) retryUpdate(fn func(*badger.Txn) error, maxRetries int) error {
+	var err error
+	for i := 0; i < maxRetries; i++ {
+		err = s.db.Update(fn)
+		if err == nil {
+			return nil
+		}
+		// 检查是否是事务冲突错误
+		// BadgerDB 在事务冲突时会返回包含 "Transaction Conflict" 的错误
+		errStr := err.Error()
+		if strings.Contains(errStr, "Transaction Conflict") ||
+			strings.Contains(errStr, "conflict") ||
+			strings.Contains(errStr, "Conflict") {
+			// 指数退避 + 随机抖动：避免所有请求同时重试
+			// 基础退避：1ms, 2ms, 4ms, 8ms, 16ms, 32ms...
+			baseBackoff := time.Duration(1<<uint(i)) * time.Millisecond
+			// 最大退避时间：50ms（高并发时需要更长等待）
+			if baseBackoff > 50*time.Millisecond {
+				baseBackoff = 50 * time.Millisecond
+			}
+			// 添加随机抖动（0-50%），避免雷群效应
+			jitter := time.Duration(rand.Float64() * float64(baseBackoff) * 0.5)
+			backoff := baseBackoff + jitter
+			time.Sleep(backoff)
+			continue
+		}
+		// 其他错误直接返回
+		return err
+	}
+	return err
+}
+
 // setKey 方法用于生成存储在 Badger 数据库中的键
 func (s *BoltreonStore) setKey(key string, parts ...string) string {
 	base := []string{KeyTypeSet, key}
@@ -20,7 +53,7 @@ func (s *BoltreonStore) setKey(key string, parts ...string) string {
 // SAdd 实现 Redis SADD 命令
 func (s *BoltreonStore) SAdd(key string, members ...string) (int, error) {
 	added := 0
-	err := s.db.Update(func(txn *badger.Txn) error {
+	err := s.retryUpdate(func(txn *badger.Txn) error {
 		if err := txn.Set(TypeOfKeyGet(key), []byte(KeyTypeSet)); err != nil {
 			return err
 		}
@@ -37,6 +70,7 @@ func (s *BoltreonStore) SAdd(key string, members ...string) (int, error) {
 			count = helper.BytesToUint64(countBytes)
 		}
 
+		added = 0
 		for _, member := range members {
 			memberKey := s.setKey(key, "member", member)
 
@@ -56,14 +90,14 @@ func (s *BoltreonStore) SAdd(key string, members ...string) (int, error) {
 			return txn.Set([]byte(countKey), helper.Uint64ToBytes(count))
 		}
 		return nil
-	})
+	}, 30) // 最多重试 30 次（高并发时需要更多重试）
 	return added, err
 }
 
 // SRem 实现 Redis SREM 命令
 func (s *BoltreonStore) SRem(key string, members ...string) (int, error) {
 	removed := 0
-	err := s.db.Update(func(txn *badger.Txn) error {
+	err := s.retryUpdate(func(txn *badger.Txn) error {
 		countKey := s.setKey(key, "count")
 		var count uint64
 
@@ -77,6 +111,7 @@ func (s *BoltreonStore) SRem(key string, members ...string) (int, error) {
 			count = helper.BytesToUint64(countBytes)
 		}
 
+		removed = 0
 		for _, member := range members {
 			memberKey := s.setKey(key, "member", member)
 
@@ -95,7 +130,7 @@ func (s *BoltreonStore) SRem(key string, members ...string) (int, error) {
 			return txn.Set([]byte(countKey), helper.Uint64ToBytes(count))
 		}
 		return nil
-	})
+	}, 30) // 最多重试 30 次（高并发时需要更多重试）
 	return removed, err
 }
 
@@ -169,48 +204,69 @@ func (s *BoltreonStore) SMembers(key string) ([]string, error) {
 }
 
 // SPop 实现 Redis SPOP 命令，随机弹出并删除一个成员
+// 优化：使用迭代器随机选择，避免加载所有成员
 func (s *BoltreonStore) SPop(key string) (string, error) {
 	var member string
-	err := s.db.Update(func(txn *badger.Txn) error {
-		members, err := s.getAllMembers(txn, key)
+	err := s.retryUpdate(func(txn *badger.Txn) error {
+		// 先获取集合大小
+		countKey := s.setKey(key, "count")
+		item, err := txn.Get([]byte(countKey))
+		if errors.Is(err, badger.ErrKeyNotFound) {
+			return nil // 集合为空
+		}
 		if err != nil {
 			return err
 		}
-		if len(members) == 0 {
+		countBytes, _ := item.ValueCopy(nil)
+		count := helper.BytesToUint64(countBytes)
+		if count == 0 {
 			return nil // 集合为空
 		}
 
-		// 随机选择一个成员
+		// 随机选择一个索引（0 到 count-1）
 		rand.Seed(time.Now().UnixNano())
-		index := rand.Intn(len(members))
-		member = members[index]
+		targetIndex := rand.Intn(int(count))
 
-		// 删除成员
-		memberKey := s.setKey(key, "member", member)
-		if err := txn.Delete([]byte(memberKey)); err != nil {
-			return err
-		}
+		// 使用迭代器遍历到目标索引位置
+		prefix := s.setKey(key, "member")
+		prefixBytes := []byte(prefix + ":")
+		iter := txn.NewIterator(badger.DefaultIteratorOptions)
+		defer iter.Close()
 
-		// 更新计数器
-		countKey := s.setKey(key, "count")
-		item, err := txn.Get([]byte(countKey))
-		if err == nil {
-			countBytes, _ := item.ValueCopy(nil)
-			count := helper.BytesToUint64(countBytes)
-			if count > 0 {
-				count--
-				return txn.Set([]byte(countKey), helper.Uint64ToBytes(count))
+		currentIndex := 0
+		for iter.Seek(prefixBytes); iter.ValidForPrefix(prefixBytes); iter.Next() {
+			if currentIndex == targetIndex {
+				// 找到目标成员
+				k := iter.Item().Key()
+				kStr := string(k)
+				// 提取成员名：SET:key:member:memberName
+				if strings.HasPrefix(kStr, prefix+":") {
+					member = kStr[len(prefix)+1:] // 跳过 "SET:key:member:" 前缀
+
+					// 删除成员
+					if err := txn.Delete(k); err != nil {
+						return err
+					}
+
+					// 更新计数器
+					count--
+					return txn.Set([]byte(countKey), helper.Uint64ToBytes(count))
+				}
 			}
+			currentIndex++
 		}
+
+		// 如果迭代器没有找到（理论上不应该发生），回退到旧方法
+		// 但这种情况应该很少见
 		return nil
-	})
+	}, 30) // 最多重试 30 次（高并发时需要更多重试）
 	return member, err
 }
 
 // SPopN 实现 Redis SPOP 命令（带count参数），随机弹出并删除多个成员
 func (s *BoltreonStore) SPopN(key string, count int) ([]string, error) {
 	var members []string
-	err := s.db.Update(func(txn *badger.Txn) error {
+	err := s.retryUpdate(func(txn *badger.Txn) error {
 		allMembers, err := s.getAllMembers(txn, key)
 		if err != nil {
 			return err
@@ -257,7 +313,7 @@ func (s *BoltreonStore) SPopN(key string, count int) ([]string, error) {
 			}
 		}
 		return nil
-	})
+	}, 30) // 最多重试 30 次（高并发时需要更多重试）
 	return members, err
 }
 

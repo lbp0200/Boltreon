@@ -8,6 +8,7 @@ require (
 	github.com/klauspost/compress v1.18.1
 	github.com/pierrec/lz4/v4 v4.1.21
 	github.com/redis/go-redis/v9 v9.17.2
+	github.com/rs/zerolog v1.33.0
 	github.com/zeebo/assert v1.3.1
 )
 
@@ -19,6 +20,8 @@ require (
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/google/flatbuffers v25.9.23+incompatible // indirect
+	github.com/mattn/go-colorable v0.1.13 // indirect
+	github.com/mattn/go-isatty v0.0.19 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/otel v1.38.0 // indirect
 	go.opentelemetry.io/otel/metric v1.38.0 // indirect

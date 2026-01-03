@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/lbp0200/Boltreon/internal/cluster"
+	"github.com/lbp0200/Boltreon/internal/logger"
 	"github.com/lbp0200/Boltreon/internal/proto"
 	"github.com/lbp0200/Boltreon/internal/store"
 )
@@ -30,24 +31,95 @@ func (h *Handler) ServeTCP(l net.Listener) error {
 }
 
 func (h *Handler) handleConnection(conn net.Conn) {
-	defer conn.Close()
+	remoteAddr := conn.RemoteAddr().String()
+	logger.Logger.Debug().Str("remote_addr", remoteAddr).Msg("新连接建立")
+	defer func() {
+		logger.Logger.Debug().Str("remote_addr", remoteAddr).Msg("连接关闭")
+		conn.Close()
+	}()
+
 	reader := bufio.NewReader(conn)
+	writer := bufio.NewWriter(conn)
+	defer writer.Flush()
+
+	// 设置 TCP_NODELAY 以减少延迟
+	if tcpConn, ok := conn.(*net.TCPConn); ok {
+		_ = tcpConn.SetNoDelay(true)
+	}
+
 	for {
 		req, err := proto.ReadRESP(reader)
 		if err != nil {
-			_ = proto.WriteRESP(conn, proto.NewError("ERR connection closed"))
+			// 连接关闭或读取错误，直接返回
+			// 不发送错误响应，因为连接可能已关闭
+			// 这可能是正常的连接关闭（如 redis-benchmark 完成测试后关闭连接）
+			logger.Logger.Debug().Str("remote_addr", remoteAddr).Err(err).Msg("读取请求失败")
 			return
 		}
 		args := req.Args
 		if len(args) == 0 {
-			_ = proto.WriteRESP(conn, proto.NewError("ERR no command"))
+			logger.Logger.Warn().Str("remote_addr", remoteAddr).Msg("收到空命令")
+			_ = proto.WriteRESP(writer, proto.NewError("ERR no command"))
+			_ = writer.Flush()
 			continue
 		}
 		cmd := strings.ToUpper(string(args[0]))
+		logger.Logger.Debug().
+			Str("remote_addr", remoteAddr).
+			Str("command", cmd).
+			Int("arg_count", len(args)-1).
+			Msg("执行命令")
+
 		resp := h.executeCommand(cmd, args[1:])
-		if err := proto.WriteRESP(conn, resp); err != nil {
+		if resp == nil {
+			// 如果响应为 nil，返回错误
+			logger.Logger.Error().
+				Str("remote_addr", remoteAddr).
+				Str("command", cmd).
+				Msg("命令执行返回 nil")
+			resp = proto.NewError("ERR internal error")
+		}
+
+		logger.Logger.Debug().
+			Str("remote_addr", remoteAddr).
+			Str("command", cmd).
+			Str("response_type", getResponseType(resp)).
+			Msg("发送响应")
+
+		if err := proto.WriteRESP(writer, resp); err != nil {
+			// 写入错误，连接可能已关闭
+			logger.Logger.Warn().
+				Str("remote_addr", remoteAddr).
+				Err(err).
+				Msg("写入响应失败")
 			return
 		}
+		if err := writer.Flush(); err != nil {
+			// 刷新错误，连接可能已关闭
+			logger.Logger.Warn().
+				Str("remote_addr", remoteAddr).
+				Err(err).
+				Msg("刷新缓冲区失败")
+			return
+		}
+	}
+}
+
+// getResponseType 获取响应类型（用于日志）
+func getResponseType(resp proto.RESP) string {
+	switch resp.(type) {
+	case *proto.SimpleString:
+		return "SimpleString"
+	case *proto.BulkString:
+		return "BulkString"
+	case proto.Error:
+		return "Error"
+	case proto.Integer:
+		return "Integer"
+	case *proto.Array:
+		return "Array"
+	default:
+		return "Unknown"
 	}
 }
 
@@ -1380,6 +1452,59 @@ func (h *Handler) executeCommand(cmd string, args [][]byte) proto.RESP {
 			return &proto.Array{Args: strs}
 		default:
 			return proto.NewSimpleString(fmt.Sprintf("%v", v))
+		}
+
+	// CONFIG 命令（用于 redis-benchmark 兼容性）
+	case "CONFIG":
+		if len(args) < 1 {
+			return proto.NewError("ERR wrong number of arguments for 'CONFIG' command")
+		}
+		subcommand := strings.ToUpper(string(args[0]))
+		switch subcommand {
+		case "GET":
+			// CONFIG GET 返回键值对数组
+			// 格式: [key1, value1, key2, value2, ...]
+			// 返回一些基本配置以兼容 redis-benchmark
+			if len(args) == 1 || (len(args) >= 2 && string(args[1]) == "*") {
+				// CONFIG GET 或 CONFIG GET * - 返回所有配置
+				configs := []string{
+					"save", "",
+					"appendonly", "no",
+					"maxmemory", "0",
+					"maxmemory-policy", "noeviction",
+				}
+				results := make([][]byte, len(configs))
+				for i, cfg := range configs {
+					results[i] = []byte(cfg)
+				}
+				return &proto.Array{Args: results}
+			} else if len(args) >= 2 {
+				// CONFIG GET key - 返回特定配置
+				key := string(args[1])
+				results := make([][]byte, 2)
+				results[0] = []byte(key)
+				// 返回默认值
+				switch strings.ToLower(key) {
+				case "save":
+					results[1] = []byte("")
+				case "appendonly":
+					results[1] = []byte("no")
+				case "maxmemory":
+					results[1] = []byte("0")
+				case "maxmemory-policy":
+					results[1] = []byte("noeviction")
+				default:
+					results[1] = []byte("")
+				}
+				return &proto.Array{Args: results}
+			} else {
+				return proto.NewError("ERR wrong number of arguments for 'CONFIG GET' command")
+			}
+		case "SET":
+			// CONFIG SET 返回 OK（简化实现，不实际设置）
+			return proto.OK
+		default:
+			return proto.NewError(fmt.Sprintf("ERR unknown subcommand '%s'", subcommand))
 		}
 
 	default:

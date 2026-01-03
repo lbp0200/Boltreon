@@ -20,6 +20,15 @@ func (s *BoltreonStore) stringKey(key string) string {
 
 // Set 实现 Redis SET 命令
 func (s *BoltreonStore) Set(key string, value string) error {
+	// 先更新写缓存
+	if s.writeCache != nil {
+		s.writeCache.Set(key, []byte(value))
+	}
+	// 同时更新读缓存（避免后续读取时缓存未命中）
+	if s.readCache != nil {
+		s.readCache.Set(key, []byte(value))
+	}
+
 	return s.db.Update(func(txn *badger.Txn) error {
 		if err := txn.Set(TypeOfKeyGet(key), []byte(KeyTypeString)); err != nil {
 			return err
@@ -187,6 +196,13 @@ func (s *BoltreonStore) MSetNX(keyValues ...string) (bool, error) {
 
 // Get 实现 Redis GET 命令
 func (s *BoltreonStore) Get(key string) (string, error) {
+	// 先检查读缓存
+	if s.readCache != nil {
+		if cachedValue, found := s.readCache.Get(key); found {
+			return string(cachedValue), nil
+		}
+	}
+
 	var val string
 	err := s.db.View(func(txn *badger.Txn) error {
 		strKey := s.stringKey(key)
@@ -204,6 +220,12 @@ func (s *BoltreonStore) Get(key string) (string, error) {
 		val = string(valBytes)
 		return nil
 	})
+
+	// 如果成功，更新读缓存
+	if err == nil && s.readCache != nil {
+		s.readCache.Set(key, []byte(val))
+	}
+
 	if errors.Is(err, ErrKeyNotFound) {
 		return "", ErrKeyNotFound
 	}
