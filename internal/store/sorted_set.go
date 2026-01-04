@@ -114,13 +114,13 @@ func (s *BoltreonStore) retryUpdateSortedSet(fn func(*badger.Txn) error, maxRetr
 		if strings.Contains(errStr, "Transaction Conflict") ||
 			strings.Contains(errStr, "conflict") ||
 			strings.Contains(errStr, "Conflict") {
-			// 指数退避 + 随机抖动：避免所有请求同时重试
-			// 基础退避：1ms, 2ms, 4ms, 8ms, 16ms, 32ms...
-			baseBackoff := time.Duration(1<<uint(i)) * time.Millisecond
-			// 最大退避时间：50ms（高并发时需要更长等待）
-			if baseBackoff > 50*time.Millisecond {
-				baseBackoff = 50 * time.Millisecond
-			}
+		// 指数退避 + 随机抖动：避免所有请求同时重试
+		// 基础退避：1ms, 2ms, 4ms, 8ms, 16ms, 32ms...
+		baseBackoff := time.Duration(1<<uint(i)) * time.Millisecond
+		// 最大退避时间：30ms（优化：减少单次重试的最大等待时间，提高响应速度）
+		if baseBackoff > 30*time.Millisecond {
+			baseBackoff = 30 * time.Millisecond
+		}
 			// 添加随机抖动（0-50%），避免雷群效应
 			jitter := time.Duration(rand.Float64() * float64(baseBackoff) * 0.5)
 			backoff := baseBackoff + jitter
@@ -244,7 +244,7 @@ func (s *BoltreonStore) ZAdd(zSetName string, members []ZSetMember) error {
 			Int64("card", meta.Card).
 			Msg("ZAdd: Successfully added members")
 		return nil
-	}, 30) // 最多重试 30 次（高并发时需要更多重试）
+	}, 20) // 最多重试 20 次（优化：减少重试次数，大部分冲突在前几次重试就能解决）
 }
 
 // ZRangeByScore 获取分数范围内的成员
@@ -377,7 +377,7 @@ func (s *BoltreonStore) ZRem(zSetName, member string) error {
 			Int64("card", meta.Card).
 			Msg("ZRem: Successfully removed member")
 		return nil
-	}, 30) // 最多重试 30 次（高并发时需要更多重试）
+	}, 20) // 最多重试 20 次（优化：减少重试次数）
 }
 
 // ZScore 获取成员分数
@@ -545,7 +545,7 @@ func (s *BoltreonStore) ZSetDel(zSetName string) error {
 		// 成功路径不记录日志，避免性能影响
 		logger.Logger.Debug().Str("zset_name", zSetName).Msg("ZSetDel: Successfully deleted set")
 		return nil
-	}, 30) // 最多重试 30 次（高并发时需要更多重试）
+	}, 20) // 最多重试 20 次（优化：减少重试次数）
 }
 
 // ZCard 实现 Redis ZCARD 命令，获取有序集合中成员的数量
@@ -683,7 +683,7 @@ func (s *BoltreonStore) ZIncrBy(zSetName, member string, increment float64) (flo
 
 		// 更新元数据
 		return txn.Set(metaKey, encodeMeta(meta))
-	}, 30) // 最多重试 30 次（高并发时需要更多重试）
+	}, 20) // 最多重试 20 次（优化：减少重试次数）
 	return newScore, err
 }
 
@@ -1286,7 +1286,7 @@ func (s *BoltreonStore) ZRemRangeByLex(zSetName, min, max string) (int64, error)
 			removed++
 		}
 		return nil
-	}, 30) // 最多重试 30 次（高并发时需要更多重试）
+	}, 20) // 最多重试 20 次（优化：减少重试次数）
 	return removed, err
 }
 

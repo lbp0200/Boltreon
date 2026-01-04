@@ -45,8 +45,8 @@ func NewBoltreonStoreWithCompression(path string, compressionType CompressionTyp
 	opts := badger.DefaultOptions(path)
 
 	// 性能优化配置
-	// 1. 增加 memtable 数量，提高写入并发性能
-	opts.NumMemtables = 5             // 默认 5，可以增加到 7-10
+	// 1. 增加 memtable 数量，提高写入并发性能（优化：从5增加到7，减少事务冲突）
+	opts.NumMemtables = 7             // 增加到 7，提高并发写入性能
 	opts.NumLevelZeroTables = 5       // Level 0 表数量
 	opts.NumLevelZeroTablesStall = 10 // Level 0 停滞阈值
 

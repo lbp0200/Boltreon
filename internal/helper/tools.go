@@ -6,6 +6,8 @@ import (
 	"encoding/gob"
 	"errors"
 	"fmt"
+
+	"github.com/lbp0200/Boltreon/internal/logger"
 )
 
 // store/badger_store.go
@@ -24,7 +26,7 @@ func BytesToUint64(b []byte) uint64 {
 
 func ProtectGoroutine(goFunc func()) {
 	if err := recover(); err != nil {
-		fmt.Println("func:ProtectGoroutine Error:", err)
+		logger.Logger.Error().Interface("error", err).Msg("ProtectGoroutine: recovered from panic")
 	}
 	go goFunc()
 }

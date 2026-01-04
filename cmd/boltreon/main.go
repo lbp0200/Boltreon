@@ -2,7 +2,6 @@ package main
 
 import (
 	"flag"
-	"log"
 	"net"
 	"os"
 
@@ -25,19 +24,19 @@ func main() {
 
 	db, err := store.NewBoltreonStore(*dbPath)
 	if err != nil {
-		log.Fatal(err)
+		logger.Logger.Fatal().Err(err).Msg("Failed to create store")
 	}
 	defer db.Close()
 
 	handler := &server.Handler{Db: db}
 	ln, err := net.Listen("tcp", *addr)
 	if err != nil {
-		log.Fatal(err)
+		logger.Logger.Fatal().Err(err).Str("addr", *addr).Msg("Failed to listen")
 	}
 	// 启动信息使用 WARN 级别，确保默认配置下也能显示
 	logger.Warning("Boltreon 服务器启动，监听地址: %s", *addr)
 	logger.Warning("当前日志级别: %s", logger.GetLevelString())
 	if err := handler.ServeTCP(ln); err != nil {
-		log.Fatal(err)
+		logger.Logger.Fatal().Err(err).Msg("Server failed")
 	}
 }
