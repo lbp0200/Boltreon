@@ -95,6 +95,11 @@ func (s *BoltreonStore) Close() error {
 	return s.db.Close()
 }
 
+// GetDB 获取BadgerDB实例（用于复制和备份）
+func (s *BoltreonStore) GetDB() *badger.DB {
+	return s.db
+}
+
 // TypeOfKeyGet 用于生成存储类型的键
 func TypeOfKeyGet(strKey string) []byte {
 	bKey := []byte(strKey)

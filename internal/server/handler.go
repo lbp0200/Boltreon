@@ -11,12 +11,15 @@ import (
 	"github.com/lbp0200/Boltreon/internal/cluster"
 	"github.com/lbp0200/Boltreon/internal/logger"
 	"github.com/lbp0200/Boltreon/internal/proto"
+	"github.com/lbp0200/Boltreon/internal/replication"
 	"github.com/lbp0200/Boltreon/internal/store"
 )
 
 type Handler struct {
-	Db      *store.BoltreonStore
-	Cluster *cluster.Cluster
+	Db          *store.BoltreonStore
+	Cluster     *cluster.Cluster
+	Replication *replication.ReplicationManager
+	Backup      *backup.BackupManager
 }
 
 // ServeTCP 监听并处理连接
@@ -78,6 +81,14 @@ func (h *Handler) handleConnection(conn net.Conn) {
 				Str("command", cmd).
 				Msg("命令执行返回 nil")
 			resp = proto.NewError("ERR internal error")
+		}
+
+		// 如果是主节点且是写命令，传播到从节点
+		if h.Replication != nil && h.Replication.IsMaster() && isWriteCommand(cmd) {
+			// 传播命令（排除复制相关命令）
+			if cmd != "REPLICAOF" && cmd != "PSYNC" && cmd != "REPLCONF" {
+				h.Replication.PropagateCommand(req.Args)
+			}
 		}
 
 		logger.Logger.Debug().
@@ -1503,6 +1514,239 @@ func (h *Handler) executeCommand(cmd string, args [][]byte) proto.RESP {
 		case "SET":
 			// CONFIG SET 返回 OK（简化实现，不实际设置）
 			return proto.OK
+		default:
+			return proto.NewError(fmt.Sprintf("ERR unknown subcommand '%s'", subcommand))
+		}
+
+	// 复制命令
+	case "REPLICAOF":
+		if h.Replication == nil {
+			return proto.NewError("ERR replication not enabled")
+		}
+		if len(args) < 2 {
+			return proto.NewError("ERR wrong number of arguments for 'REPLICAOF' command")
+		}
+		host := string(args[0])
+		port := string(args[1])
+		if host == "NO" && port == "ONE" {
+			// 停止复制
+			replication.StopSlaveReplication(h.Replication)
+			return proto.OK
+		}
+		// 启动复制
+		masterAddr := fmt.Sprintf("%s:%s", host, port)
+		if err := replication.StartSlaveReplication(h.Replication, h.Db, masterAddr); err != nil {
+			return proto.NewError(fmt.Sprintf("ERR %v", err))
+		}
+		return proto.OK
+
+	case "PSYNC":
+		if h.Replication == nil {
+			return proto.NewError("ERR replication not enabled")
+		}
+		if len(args) < 2 {
+			return proto.NewError("ERR wrong number of arguments for 'PSYNC' command")
+		}
+		replId := string(args[0])
+		offset, err := strconv.ParseInt(string(args[1]), 10, 64)
+		if err != nil {
+			return proto.NewError("ERR invalid offset")
+		}
+		// 处理PSYNC（主节点端）
+		result, err := replication.HandlePSync(h.Replication, replId, offset)
+		if err != nil {
+			return proto.NewError(fmt.Sprintf("ERR %v", err))
+		}
+		// 获取当前连接（需要从连接中获取）
+		// 简化实现，实际应该从连接上下文获取
+		if result.FullResync {
+			// 发送FULLRESYNC响应
+			response := fmt.Sprintf("+FULLRESYNC %s %d\r\n", result.ReplId, result.Offset)
+			return proto.NewSimpleString(strings.TrimSpace(response))
+		} else {
+			// 发送CONTINUE响应
+			response := fmt.Sprintf("+CONTINUE %s\r\n", result.ReplId)
+			return proto.NewSimpleString(strings.TrimSpace(response))
+		}
+
+	case "REPLCONF":
+		if h.Replication == nil {
+			return proto.NewError("ERR replication not enabled")
+		}
+		if len(args) < 1 {
+			return proto.NewError("ERR wrong number of arguments for 'REPLCONF' command")
+		}
+		subcommand := strings.ToUpper(string(args[0]))
+		switch subcommand {
+		case "LISTENING-PORT":
+			// REPLCONF listening-port <port>
+			// 记录从节点的监听端口
+			return proto.OK
+		case "CAPA":
+			// REPLCONF capa <capability>
+			// 记录从节点的能力
+			return proto.OK
+		case "ACK":
+			// REPLCONF ACK <offset>
+			if len(args) < 2 {
+				return proto.NewError("ERR wrong number of arguments for 'REPLCONF ACK' command")
+			}
+			offset, err := strconv.ParseInt(string(args[1]), 10, 64)
+			if err != nil {
+				return proto.NewError("ERR invalid offset")
+			}
+			// 更新从节点的ACK偏移量
+			// 简化实现
+			_ = offset
+			return proto.OK
+		case "GETACK":
+			// REPLCONF GETACK *
+			// 返回当前复制偏移量
+			offset := h.Replication.GetMasterReplOffset()
+			return &proto.Array{Args: [][]byte{
+				[]byte("REPLCONF"),
+				[]byte("ACK"),
+				[]byte(strconv.FormatInt(offset, 10)),
+			}}
+		default:
+			return proto.NewError(fmt.Sprintf("ERR unknown subcommand '%s'", subcommand))
+		}
+
+	// INFO命令
+	case "INFO":
+		section := ""
+		if len(args) >= 1 {
+			section = strings.ToUpper(string(args[0]))
+		}
+		info := h.buildInfoResponse(section)
+		return proto.NewBulkString([]byte(info))
+
+	// 备份命令
+	case "SAVE":
+		if h.Backup == nil {
+			return proto.NewError("ERR backup not enabled")
+		}
+		if err := h.Backup.Save(); err != nil {
+			return proto.NewError(fmt.Sprintf("ERR %v", err))
+		}
+		return proto.OK
+
+	case "BGSAVE":
+		if h.Backup == nil {
+			return proto.NewError("ERR backup not enabled")
+		}
+		if err := h.Backup.BGSave(); err != nil {
+			return proto.NewError(fmt.Sprintf("ERR %v", err))
+		}
+		return proto.NewSimpleString("Background saving started")
+
+	case "LASTSAVE":
+		if h.Backup == nil {
+			return proto.NewError("ERR backup not enabled")
+		}
+		lastSave := h.Backup.LastSave()
+		return proto.NewInteger(lastSave)
+
+	// Pub/Sub命令
+	case "PUBLISH":
+		if h.PubSub == nil {
+			return proto.NewError("ERR pubsub not enabled")
+		}
+		if len(args) < 2 {
+			return proto.NewError("ERR wrong number of arguments for 'PUBLISH' command")
+		}
+		channel := string(args[0])
+		message := args[1]
+		count := h.PubSub.Publish(channel, message)
+		return proto.NewInteger(int64(count))
+
+	case "SUBSCRIBE":
+		if h.PubSub == nil {
+			return proto.NewError("ERR pubsub not enabled")
+		}
+		if len(args) < 1 {
+			return proto.NewError("ERR wrong number of arguments for 'SUBSCRIBE' command")
+		}
+		// 简化实现：返回订阅确认
+		channels := make([]string, len(args))
+		for i, arg := range args {
+			channels[i] = string(arg)
+		}
+		// 实际应该创建订阅者并持续发送消息
+		// 这里简化处理
+		return &proto.Array{Args: [][]byte{
+			[]byte("subscribe"),
+			[]byte(channels[0]),
+			[]byte("1"),
+		}}
+
+	case "PSUBSCRIBE":
+		if h.PubSub == nil {
+			return proto.NewError("ERR pubsub not enabled")
+		}
+		if len(args) < 1 {
+			return proto.NewError("ERR wrong number of arguments for 'PSUBSCRIBE' command")
+		}
+		// 简化实现
+		patterns := make([]string, len(args))
+		for i, arg := range args {
+			patterns[i] = string(arg)
+		}
+		return &proto.Array{Args: [][]byte{
+			[]byte("psubscribe"),
+			[]byte(patterns[0]),
+			[]byte("1"),
+		}}
+
+	case "UNSUBSCRIBE":
+		if h.PubSub == nil {
+			return proto.NewError("ERR pubsub not enabled")
+		}
+		// 简化实现
+		return &proto.Array{Args: [][]byte{
+			[]byte("unsubscribe"),
+		}}
+
+	case "PUNSUBSCRIBE":
+		if h.PubSub == nil {
+			return proto.NewError("ERR pubsub not enabled")
+		}
+		// 简化实现
+		return &proto.Array{Args: [][]byte{
+			[]byte("punsubscribe"),
+		}}
+
+	case "PUBSUB":
+		if h.PubSub == nil {
+			return proto.NewError("ERR pubsub not enabled")
+		}
+		if len(args) < 1 {
+			return proto.NewError("ERR wrong number of arguments for 'PUBSUB' command")
+		}
+		subcommand := strings.ToUpper(string(args[0]))
+		switch subcommand {
+		case "CHANNELS":
+			pattern := "*"
+			if len(args) >= 2 {
+				pattern = string(args[1])
+			}
+			channels := h.PubSub.GetChannels(pattern)
+			results := make([][]byte, len(channels))
+			for i, ch := range channels {
+				results[i] = []byte(ch)
+			}
+			return &proto.Array{Args: results}
+		case "NUMSUB":
+			if len(args) < 2 {
+				return proto.NewError("ERR wrong number of arguments for 'PUBSUB NUMSUB' command")
+			}
+			results := make([][]byte, 0)
+			for i := 1; i < len(args); i++ {
+				channel := string(args[i])
+				count := h.PubSub.GetSubscriberCount(channel)
+				results = append(results, []byte(channel), []byte(strconv.FormatInt(int64(count), 10)))
+			}
+			return &proto.Array{Args: results}
 		default:
 			return proto.NewError(fmt.Sprintf("ERR unknown subcommand '%s'", subcommand))
 		}

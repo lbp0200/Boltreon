@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/lbp0200/Boltreon/internal/logger"
+	"github.com/lbp0200/Boltreon/internal/replication"
 	"github.com/lbp0200/Boltreon/internal/server"
 
 	"github.com/lbp0200/Boltreon/internal/store"
@@ -28,7 +29,22 @@ func main() {
 	}
 	defer db.Close()
 
-	handler := &server.Handler{Db: db}
+	// 初始化复制管理器
+	replMgr := replication.NewReplicationManager(db)
+
+	// 初始化备份管理器
+	backupDir := *dbPath + "/backup"
+	backupMgr := backup.NewBackupManager(db, backupDir)
+
+	// 初始化Pub/Sub管理器
+	pubsubMgr := store.NewPubSubManager()
+
+	handler := &server.Handler{
+		Db:          db,
+		Replication: replMgr,
+		Backup:      backupMgr,
+		PubSub:      pubsubMgr,
+	}
 	ln, err := net.Listen("tcp", *addr)
 	if err != nil {
 		logger.Logger.Fatal().Err(err).Str("addr", *addr).Msg("Failed to listen")

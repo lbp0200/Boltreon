@@ -1,0 +1,313 @@
+package store
+
+import (
+	"sync"
+	"time"
+
+	"github.com/lbp0200/Boltreon/internal/logger"
+)
+
+// PubSubManager Pub/Sub管理器
+type PubSubManager struct {
+	mu           sync.RWMutex
+	channels     map[string]map[*Subscriber]bool // 频道 -> 订阅者映射
+	patterns     map[string]map[*Subscriber]bool // 模式 -> 订阅者映射
+	subscribers  map[*Subscriber]bool             // 所有订阅者
+}
+
+// Subscriber 订阅者
+type Subscriber struct {
+	ID       string
+	Channels map[string]bool
+	Patterns map[string]bool
+	MessageCh chan *Message
+	mu       sync.RWMutex
+}
+
+// Message 消息
+type Message struct {
+	Channel string
+	Pattern string
+	Data    []byte
+}
+
+// NewPubSubManager 创建新的Pub/Sub管理器
+func NewPubSubManager() *PubSubManager {
+	return &PubSubManager{
+		channels:    make(map[string]map[*Subscriber]bool),
+		patterns:    make(map[string]map[*Subscriber]bool),
+		subscribers: make(map[*Subscriber]bool),
+	}
+}
+
+// NewSubscriber 创建新的订阅者
+func NewSubscriber(id string) *Subscriber {
+	return &Subscriber{
+		ID:        id,
+		Channels:  make(map[string]bool),
+		Patterns:  make(map[string]bool),
+		MessageCh: make(chan *Message, 100),
+	}
+}
+
+// Subscribe 订阅频道
+func (psm *PubSubManager) Subscribe(subscriber *Subscriber, channels ...string) []string {
+	psm.mu.Lock()
+	defer psm.mu.Unlock()
+
+	psm.subscribers[subscriber] = true
+	subscribed := make([]string, 0)
+
+	for _, channel := range channels {
+		subscriber.mu.Lock()
+		subscriber.Channels[channel] = true
+		subscriber.mu.Unlock()
+
+		if psm.channels[channel] == nil {
+			psm.channels[channel] = make(map[*Subscriber]bool)
+		}
+		psm.channels[channel][subscriber] = true
+		subscribed = append(subscribed, channel)
+	}
+
+	return subscribed
+}
+
+// PSubscribe 订阅模式
+func (psm *PubSubManager) PSubscribe(subscriber *Subscriber, patterns ...string) []string {
+	psm.mu.Lock()
+	defer psm.mu.Unlock()
+
+	psm.subscribers[subscriber] = true
+	subscribed := make([]string, 0)
+
+	for _, pattern := range patterns {
+		subscriber.mu.Lock()
+		subscriber.Patterns[pattern] = true
+		subscriber.mu.Unlock()
+
+		if psm.patterns[pattern] == nil {
+			psm.patterns[pattern] = make(map[*Subscriber]bool)
+		}
+		psm.patterns[pattern][subscriber] = true
+		subscribed = append(subscribed, pattern)
+	}
+
+	return subscribed
+}
+
+// Unsubscribe 取消订阅频道
+func (psm *PubSubManager) Unsubscribe(subscriber *Subscriber, channels ...string) []string {
+	psm.mu.Lock()
+	defer psm.mu.Unlock()
+
+	unsubscribed := make([]string, 0)
+
+	if len(channels) == 0 {
+		// 取消所有订阅
+		subscriber.mu.RLock()
+		for channel := range subscriber.Channels {
+			channels = append(channels, channel)
+		}
+		subscriber.mu.RUnlock()
+	}
+
+	for _, channel := range channels {
+		subscriber.mu.Lock()
+		if subscriber.Channels[channel] {
+			delete(subscriber.Channels, channel)
+			unsubscribed = append(unsubscribed, channel)
+		}
+		subscriber.mu.Unlock()
+
+		if subs, exists := psm.channels[channel]; exists {
+			delete(subs, subscriber)
+			if len(subs) == 0 {
+				delete(psm.channels, channel)
+			}
+		}
+	}
+
+	return unsubscribed
+}
+
+// PUnsubscribe 取消订阅模式
+func (psm *PubSubManager) PUnsubscribe(subscriber *Subscriber, patterns ...string) []string {
+	psm.mu.Lock()
+	defer psm.mu.Unlock()
+
+	unsubscribed := make([]string, 0)
+
+	if len(patterns) == 0 {
+		// 取消所有模式订阅
+		subscriber.mu.RLock()
+		for pattern := range subscriber.Patterns {
+			patterns = append(patterns, pattern)
+		}
+		subscriber.mu.RUnlock()
+	}
+
+	for _, pattern := range patterns {
+		subscriber.mu.Lock()
+		if subscriber.Patterns[pattern] {
+			delete(subscriber.Patterns, pattern)
+			unsubscribed = append(unsubscribed, pattern)
+		}
+		subscriber.mu.Unlock()
+
+		if subs, exists := psm.patterns[pattern]; exists {
+			delete(subs, subscriber)
+			if len(subs) == 0 {
+				delete(psm.patterns, pattern)
+			}
+		}
+	}
+
+	return unsubscribed
+}
+
+// Publish 发布消息
+func (psm *PubSubManager) Publish(channel string, message []byte) int {
+	psm.mu.RLock()
+	defer psm.mu.RUnlock()
+
+	count := 0
+	msg := &Message{
+		Channel: channel,
+		Data:    message,
+	}
+
+	// 发送给频道订阅者
+	if subs, exists := psm.channels[channel]; exists {
+		for sub := range subs {
+			select {
+			case sub.MessageCh <- msg:
+				count++
+			default:
+				logger.Logger.Warn().
+					Str("subscriber_id", sub.ID).
+					Str("channel", channel).
+					Msg("订阅者消息通道已满，跳过消息")
+			}
+		}
+	}
+
+	// 发送给模式订阅者
+	for pattern, subs := range psm.patterns {
+		if matchPattern(channel, pattern) {
+			patternMsg := &Message{
+				Channel: channel,
+				Pattern: pattern,
+				Data:    message,
+			}
+			for sub := range subs {
+				select {
+				case sub.MessageCh <- patternMsg:
+					count++
+				default:
+					logger.Logger.Warn().
+						Str("subscriber_id", sub.ID).
+						Str("pattern", pattern).
+						Msg("订阅者消息通道已满，跳过消息")
+				}
+			}
+		}
+	}
+
+	return count
+}
+
+// GetSubscriberCount 获取订阅者数量
+func (psm *PubSubManager) GetSubscriberCount(channel string) int {
+	psm.mu.RLock()
+	defer psm.mu.RUnlock()
+
+	if subs, exists := psm.channels[channel]; exists {
+		return len(subs)
+	}
+	return 0
+}
+
+// RemoveSubscriber 移除订阅者
+func (psm *PubSubManager) RemoveSubscriber(subscriber *Subscriber) {
+	psm.mu.Lock()
+	defer psm.mu.Unlock()
+
+	// 取消所有频道订阅
+	subscriber.mu.RLock()
+	channels := make([]string, 0, len(subscriber.Channels))
+	for channel := range subscriber.Channels {
+		channels = append(channels, channel)
+	}
+	patterns := make([]string, 0, len(subscriber.Patterns))
+	for pattern := range subscriber.Patterns {
+		patterns = append(patterns, pattern)
+	}
+	subscriber.mu.RUnlock()
+
+	psm.Unsubscribe(subscriber, channels...)
+	psm.PUnsubscribe(subscriber, patterns...)
+
+	delete(psm.subscribers, subscriber)
+	close(subscriber.MessageCh)
+}
+
+// matchPattern 匹配模式（简化实现，支持*通配符）
+func matchPattern(str, pattern string) bool {
+	// 简化实现，只支持*通配符
+	if pattern == "*" {
+		return true
+	}
+
+	// 简单的通配符匹配
+	patternParts := splitPattern(pattern)
+	strParts := splitPattern(str)
+
+	if len(patternParts) != len(strParts) {
+		return false
+	}
+
+	for i, part := range patternParts {
+		if part != "*" && part != strParts[i] {
+			return false
+		}
+	}
+
+	return true
+}
+
+// splitPattern 分割模式（简化实现）
+func splitPattern(pattern string) []string {
+	// 简化实现，按*分割
+	parts := make([]string, 0)
+	current := ""
+	for _, char := range pattern {
+		if char == '*' {
+			if current != "" {
+				parts = append(parts, current)
+				current = ""
+			}
+			parts = append(parts, "*")
+		} else {
+			current += string(char)
+		}
+	}
+	if current != "" {
+		parts = append(parts, current)
+	}
+	return parts
+}
+
+// GetChannels 获取所有频道
+func (psm *PubSubManager) GetChannels(pattern string) []string {
+	psm.mu.RLock()
+	defer psm.mu.RUnlock()
+
+	channels := make([]string, 0)
+	for channel := range psm.channels {
+		if pattern == "" || pattern == "*" || matchPattern(channel, pattern) {
+			channels = append(channels, channel)
+		}
+	}
+	return channels
+}
