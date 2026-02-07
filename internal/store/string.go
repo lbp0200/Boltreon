@@ -87,12 +87,12 @@ func (s *BoltreonStore) SetNX(key string, value string) (bool, error) {
 
 // GetSet 实现 Redis GETSET 命令，设置新值并返回旧值
 func (s *BoltreonStore) GetSet(key string, value string) (string, error) {
+	// 先读取旧值（在 View 事务中）
 	var oldValue string
-	err := s.db.Update(func(txn *badger.Txn) error {
+	err := s.db.View(func(txn *badger.Txn) error {
 		strKey := s.stringKey(key)
 		item, err := txn.Get([]byte(strKey))
 		if err == nil {
-			// 键存在，获取旧值（需要解压缩）
 			val, err := s.getValueWithDecompression(item)
 			if err != nil {
 				return err
@@ -101,13 +101,13 @@ func (s *BoltreonStore) GetSet(key string, value string) (string, error) {
 		} else if !errors.Is(err, badger.ErrKeyNotFound) {
 			return err
 		}
-		// 设置新值（需要压缩）
-		if err := txn.Set(TypeOfKeyGet(key), []byte(KeyTypeString)); err != nil {
-			return err
-		}
-		return s.setValueWithCompression(txn, []byte(strKey), []byte(value))
+		return nil
 	})
-	return oldValue, err
+	if err != nil {
+		return "", err
+	}
+	// 然后写入新值（在单独的 Update 事务中）
+	return oldValue, s.Set(key, value)
 }
 
 // MGet 实现 Redis MGET 命令，获取多个键的值
@@ -334,29 +334,29 @@ func (s *BoltreonStore) setFloatValue(txn *badger.Txn, key string, value float64
 
 // INCRBYFLOAT 实现 Redis INCRBYFLOAT 命令，将键的值增加指定浮点数
 func (s *BoltreonStore) INCRBYFLOAT(key string, increment float64) (float64, error) {
-	var newValue float64
-	err := s.db.Update(func(txn *badger.Txn) error {
-		oldValue, err := s.getFloatValue(txn, key)
-		if err != nil {
-			return err
-		}
-		newValue = oldValue + increment
-		// 检查溢出
-		if math.IsInf(newValue, 0) || math.IsNaN(newValue) {
-			return fmt.Errorf("increment would produce NaN or Infinity")
-		}
-		return s.setFloatValue(txn, key, newValue)
-	})
-	return newValue, err
+	// 先读取旧值（在 View 事务中）
+	oldValue, err := s.Get(key)
+	if err != nil && !errors.Is(err, ErrKeyNotFound) {
+		return 0, err
+	}
+	oldFloat, _ := strconv.ParseFloat(oldValue, 64)
+	newValue := oldFloat + increment
+	// 检查溢出
+	if math.IsInf(newValue, 0) || math.IsNaN(newValue) {
+		return 0, fmt.Errorf("increment would produce NaN or Infinity")
+	}
+	// 写入新值
+	newValueStr := strconv.FormatFloat(newValue, 'f', -1, 64)
+	return newValue, s.Set(key, newValueStr)
 }
 
 // APPEND 实现 Redis APPEND 命令，追加字符串
 func (s *BoltreonStore) APPEND(key string, value string) (int, error) {
-	var newLength int
-	err := s.db.Update(func(txn *badger.Txn) error {
+	// 先读取旧值（在 View 事务中）
+	var existingValue string
+	err := s.db.View(func(txn *badger.Txn) error {
 		strKey := s.stringKey(key)
 		item, err := txn.Get([]byte(strKey))
-		var existingValue string
 		if err == nil {
 			val, err := s.getValueWithDecompression(item)
 			if err != nil {
@@ -366,14 +366,15 @@ func (s *BoltreonStore) APPEND(key string, value string) (int, error) {
 		} else if !errors.Is(err, badger.ErrKeyNotFound) {
 			return err
 		}
-		newValue := existingValue + value
-		newLength = len(newValue)
-		if err := txn.Set(TypeOfKeyGet(key), []byte(KeyTypeString)); err != nil {
-			return err
-		}
-		return s.setValueWithCompression(txn, []byte(strKey), []byte(newValue))
+		return nil
 	})
-	return newLength, err
+	if err != nil {
+		return 0, err
+	}
+	// 然后写入新值
+	newValue := existingValue + value
+	newLength := len(newValue)
+	return newLength, s.Set(key, newValue)
 }
 
 // StrLen 实现 Redis STRLEN 命令，获取字符串长度
@@ -450,11 +451,11 @@ func (s *BoltreonStore) GetRange(key string, start, end int) (string, error) {
 
 // SetRange 实现 Redis SETRANGE 命令，设置字符串的子串
 func (s *BoltreonStore) SetRange(key string, offset int, value string) (int, error) {
-	var newLength int
-	err := s.db.Update(func(txn *badger.Txn) error {
+	// 先读取旧值（在 View 事务中）
+	var existingValue string
+	err := s.db.View(func(txn *badger.Txn) error {
 		strKey := s.stringKey(key)
 		item, err := txn.Get([]byte(strKey))
-		var existingValue string
 		if err == nil {
 			val, err := s.getValueWithDecompression(item)
 			if err != nil {
@@ -464,26 +465,27 @@ func (s *BoltreonStore) SetRange(key string, offset int, value string) (int, err
 		} else if !errors.Is(err, badger.ErrKeyNotFound) {
 			return err
 		}
-		// 如果offset超出当前长度，用null字节填充
-		if offset > len(existingValue) {
-			existingValue += string(make([]byte, offset-len(existingValue)))
-		}
-		// 构建新字符串
-		var newValue string
-		if offset > 0 {
-			newValue = existingValue[:offset]
-		}
-		newValue += value
-		if offset+len(value) < len(existingValue) {
-			newValue += existingValue[offset+len(value):]
-		}
-		newLength = len(newValue)
-		if err := txn.Set(TypeOfKeyGet(key), []byte(KeyTypeString)); err != nil {
-			return err
-		}
-		return s.setValueWithCompression(txn, []byte(strKey), []byte(newValue))
+		return nil
 	})
-	return newLength, err
+	if err != nil {
+		return 0, err
+	}
+	// 如果offset超出当前长度，用null字节填充
+	if offset > len(existingValue) {
+		existingValue += string(make([]byte, offset-len(existingValue)))
+	}
+	// 构建新字符串
+	var newValue string
+	if offset > 0 {
+		newValue = existingValue[:offset]
+	}
+	newValue += value
+	if offset+len(value) < len(existingValue) {
+		newValue += existingValue[offset+len(value):]
+	}
+	newLength := len(newValue)
+	// 写入新值
+	return newLength, s.Set(key, newValue)
 }
 
 // getStringBytes 获取字符串的字节数组

@@ -142,6 +142,12 @@ func (h *Handler) executeCommand(cmd string, args [][]byte) proto.RESP {
 	case "PING":
 		return proto.NewSimpleString("PONG")
 
+	case "ECHO":
+		if len(args) < 1 {
+			return proto.NewError("ERR wrong number of arguments for 'ECHO' command")
+		}
+		return proto.NewBulkString(args[0])
+
 	// String命令
 	case "SET":
 		if len(args) < 2 {
@@ -1131,15 +1137,29 @@ func (h *Handler) executeCommand(cmd string, args [][]byte) proto.RESP {
 		return proto.NewBulkString([]byte(member))
 
 	case "SRANDMEMBER":
-		if len(args) < 1 {
-			return proto.NewError("ERR wrong number of arguments for 'SRANDMEMBER' command")
-		}
 		key := string(args[0])
-		member, err := h.Db.SRandMember(key)
-		if err != nil || member == "" {
+		if len(args) == 1 {
+			// SRANDMEMBER key - return single member
+			member, err := h.Db.SRandMember(key)
+			if err != nil || member == "" {
+				return proto.NewBulkString(nil)
+			}
+			return proto.NewBulkString([]byte(member))
+		}
+		// SRANDMEMBER key count - return array of members
+		count, err := strconv.Atoi(string(args[1]))
+		if err != nil {
+			return proto.NewError("ERR value is not an integer")
+		}
+		members, err := h.Db.SRandMemberN(key, count)
+		if err != nil {
 			return proto.NewBulkString(nil)
 		}
-		return proto.NewBulkString([]byte(member))
+		results := make([][]byte, len(members))
+		for i, m := range members {
+			results[i] = []byte(m)
+		}
+		return &proto.Array{Args: results}
 
 	case "SMOVE":
 		if len(args) < 3 {
@@ -1648,6 +1668,27 @@ func (h *Handler) executeCommand(cmd string, args [][]byte) proto.RESP {
 		}
 		lastSave := h.Backup.LastSave()
 		return proto.NewInteger(lastSave)
+
+	case "DBSIZE":
+		keys, err := h.Db.Keys("*")
+		if err != nil {
+			return proto.NewError(fmt.Sprintf("ERR %v", err))
+		}
+		return proto.NewInteger(int64(len(keys)))
+
+	case "FLUSHDB":
+		err := h.Db.FlushDB()
+		if err != nil {
+			return proto.NewError(fmt.Sprintf("ERR %v", err))
+		}
+		return proto.OK
+
+	case "FLUSHALL":
+		err := h.Db.FlushDB()
+		if err != nil {
+			return proto.NewError(fmt.Sprintf("ERR %v", err))
+		}
+		return proto.OK
 
 	// Pub/Sub命令
 	case "PUBLISH":

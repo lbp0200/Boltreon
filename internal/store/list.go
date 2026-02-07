@@ -1020,118 +1020,72 @@ func (s *BoltreonStore) RPopLPush(source, destination string) (string, error) {
 
 // LPUSHX 实现 Redis LPUSHX 命令，仅当键存在时左推入
 func (s *BoltreonStore) LPUSHX(key string, values ...string) (int, error) {
-	var count int
-	err := s.db.Update(func(txn *badger.Txn) error {
-		// 检查键是否存在
+	// 先检查键是否存在且是List类型（在 View 事务中）
+	var isList bool
+	err := s.db.View(func(txn *badger.Txn) error {
 		typeKey := TypeOfKeyGet(key)
 		item, err := txn.Get(typeKey)
 		if errors.Is(err, badger.ErrKeyNotFound) {
-			return nil // 键不存在，返回0
+			return nil // 键不存在
 		}
 		if err != nil {
 			return err
 		}
-
 		val, err := item.ValueCopy(nil)
 		if err != nil {
 			return err
 		}
-
 		keyType := string(val)
 		if keyType != KeyTypeList {
-			return nil // 不是List类型，返回0
+			return nil // 不是List类型
 		}
-
-		// 键存在且是List类型，执行LPUSH
-		length, start, end, err := s.listGetMeta(key)
-		if err != nil {
-			return err
-		}
-
-		// 执行LPUSH逻辑
-		for _, value := range values {
-			nodeID, err := s.createNode(txn, key, []byte(value))
-			if err != nil {
-				return err
-			}
-
-			if length == 0 {
-				// 空列表
-				start = nodeID
-				end = nodeID
-			} else {
-				// 链接到头部
-				if err := s.linkNodes(txn, key, nodeID, start); err != nil {
-					return err
-				}
-				start = nodeID
-			}
-			length++
-			count++
-		}
-
-		// 更新元数据
-		return s.listUpdateMeta(txn, key, length, start, end)
+		isList = true
+		return nil
 	})
-	return count, err
+	if err != nil {
+		return 0, err
+	}
+	if !isList {
+		return 0, nil
+	}
+
+	// 然后执行LPUSH（在 Update 事务中）
+	return s.LPush(key, values...)
 }
 
 // RPUSHX 实现 Redis RPUSHX 命令，仅当键存在时右推入
 func (s *BoltreonStore) RPUSHX(key string, values ...string) (int, error) {
-	var count int
-	err := s.db.Update(func(txn *badger.Txn) error {
-		// 检查键是否存在
+	// 先检查键是否存在且是List类型（在 View 事务中）
+	var isList bool
+	err := s.db.View(func(txn *badger.Txn) error {
 		typeKey := TypeOfKeyGet(key)
 		item, err := txn.Get(typeKey)
 		if errors.Is(err, badger.ErrKeyNotFound) {
-			return nil // 键不存在，返回0
+			return nil // 键不存在
 		}
 		if err != nil {
 			return err
 		}
-
 		val, err := item.ValueCopy(nil)
 		if err != nil {
 			return err
 		}
-
 		keyType := string(val)
 		if keyType != KeyTypeList {
-			return nil // 不是List类型，返回0
+			return nil // 不是List类型
 		}
-
-		// 键存在且是List类型，执行RPUSH
-		length, start, end, err := s.listGetMeta(key)
-		if err != nil {
-			return err
-		}
-
-		// 执行RPUSH逻辑
-		for _, value := range values {
-			nodeID, err := s.createNode(txn, key, []byte(value))
-			if err != nil {
-				return err
-			}
-
-			if length == 0 {
-				// 空列表
-				start = nodeID
-				end = nodeID
-			} else {
-				// 链接到尾部
-				if err := s.linkNodes(txn, key, end, nodeID); err != nil {
-					return err
-				}
-				end = nodeID
-			}
-			length++
-			count++
-		}
-
-		// 更新元数据
-		return s.listUpdateMeta(txn, key, length, start, end)
+		isList = true
+		return nil
 	})
-	return count, err
+	if err != nil {
+		return 0, err
+	}
+	if !isList {
+		return 0, nil
+	}
+
+	// 然后执行RPUSH（在 Update 事务中）
+	return s.RPush(key, values...)
 }
 
 // BLPOP 实现 Redis BLPOP 命令，阻塞式左弹出（简化版本：非阻塞）

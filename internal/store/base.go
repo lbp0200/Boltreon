@@ -23,6 +23,12 @@ func (s *BoltreonStore) Del(key string) error {
 			return err
 		}
 		keyType := string(valCopy)
+		
+		// 清除读缓存
+		if s.readCache != nil {
+			s.readCache.Delete(key)
+		}
+
 		switch keyType {
 		case KeyTypeString:
 			if err := txn.Delete(typeKey); err != nil {
@@ -61,6 +67,12 @@ func (s *BoltreonStore) DelString(key string) error {
 	bKey := []byte(key)
 	badgerTypeKey := TypeOfKeyGet(key)
 	badgerValueKey := s.stringKey(string(bKey))
+	
+	// 清除读缓存
+	if s.readCache != nil {
+		s.readCache.Delete(key)
+	}
+	
 	return s.db.Update(func(txn *badger.Txn) error {
 		errDel := txn.Delete(badgerTypeKey)
 		if errDel != nil {
@@ -390,12 +402,14 @@ func (s *BoltreonStore) PTTL(key string) (int64, error) {
 
 // PERSIST 实现 Redis PERSIST 命令，移除键的过期时间
 func (s *BoltreonStore) Persist(key string) (bool, error) {
-	success := false
-	err := s.db.Update(func(txn *badger.Txn) error {
+	// 先读取键的类型和值键（在 View 事务中）
+	var valueKey []byte
+	var hasTTL bool
+	err := s.db.View(func(txn *badger.Txn) error {
 		typeKey := TypeOfKeyGet(key)
 		item, err := txn.Get(typeKey)
 		if errors.Is(err, badger.ErrKeyNotFound) {
-			return nil // 键不存在，返回false
+			return ErrKeyNotFound // 键不存在
 		}
 		if err != nil {
 			return err
@@ -407,35 +421,48 @@ func (s *BoltreonStore) Persist(key string) (bool, error) {
 		keyType := string(val)
 
 		// 获取值键
-		valueKey, err := s.getKeyValueKey(key, keyType)
+		vk, err := s.getKeyValueKey(key, keyType)
 		if err != nil {
 			return err
 		}
+		valueKey = vk
 
 		// 检查是否有TTL
 		valueItem, err := txn.Get(valueKey)
 		if errors.Is(err, badger.ErrKeyNotFound) {
-			return nil
+			return ErrKeyNotFound
 		}
 		if err != nil {
 			return err
 		}
+		hasTTL = valueItem.ExpiresAt() != 0
+		return nil
+	})
+	if err != nil {
+		return false, nil // 键不存在或没有TTL
+	}
+	if !hasTTL {
+		return false, nil
+	}
 
-		expiresAt := valueItem.ExpiresAt()
-		if expiresAt == 0 {
-			return nil // 没有TTL，返回false
-		}
-
-		// 获取当前值并重新设置（无TTL）
-		valBytes, err := valueItem.ValueCopy(nil)
+	// 重新读取值并写入无TTL副本（在 Update 事务中）
+	var valBytes []byte
+	err = s.db.Update(func(txn *badger.Txn) error {
+		valueItem, err := txn.Get(valueKey)
 		if err != nil {
 			return err
 		}
+		valBytes, err = valueItem.ValueCopy(nil)
+		return err
+	})
+	if err != nil {
+		return false, err
+	}
 
-		success = true
+	// 写入无TTL的值
+	return true, s.db.Update(func(txn *badger.Txn) error {
 		return txn.Set(valueKey, valBytes)
 	})
-	return success, err
 }
 
 // RENAME 实现 Redis RENAME 命令，重命名键

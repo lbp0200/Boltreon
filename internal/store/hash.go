@@ -61,14 +61,37 @@ func (s *BoltreonStore) HSet(key, field string, value interface{}) error {
 	}
 	hkey := s.hashKey(key, field)
 	typeKey := TypeOfKeyGet(key)
-	return s.db.Update(func(txn *badger.Txn) error {
-		if err := txn.Set(typeKey, []byte(KeyTypeHash)); err != nil {
+
+	// 先在View事务中获取当前计数
+	var currentCount uint64
+	err := s.db.View(func(txn *badger.Txn) error {
+		countKey := s.hashCountKey(key)
+		countItem, err := txn.Get(countKey)
+		if err == nil {
+			val, err := countItem.ValueCopy(nil)
+			if err != nil {
+				return fmt.Errorf("HSet: failed to get count value: %v", err)
+			}
+			currentCount = helper.BytesToUint64(val)
+		} else if !errors.Is(err, badger.ErrKeyNotFound) {
 			return err
 		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+
+	// 然后在Update事务中写入
+	return s.db.Update(func(txn *badger.Txn) error {
 		// 检查字段是否存在
 		exists := false
 		if _, err := txn.Get(hkey); err == nil {
 			exists = true
+		}
+
+		if err := txn.Set(typeKey, []byte(KeyTypeHash)); err != nil {
+			return err
 		}
 
 		// 写入字段值（带压缩）
@@ -78,22 +101,9 @@ func (s *BoltreonStore) HSet(key, field string, value interface{}) error {
 
 		// 更新计数器
 		countKey := s.hashCountKey(key)
-		var currentCount uint64
-		countItem, err := txn.Get(countKey)
-		if errors.Is(err, badger.ErrKeyNotFound) {
-			currentCount = 0
-		} else {
-			val, err := countItem.ValueCopy(nil)
-			if err != nil {
-				return fmt.Errorf("HSet: failed to get count value: %v", err)
-			}
-			currentCount = helper.BytesToUint64(val)
-		}
-
 		if !exists {
 			currentCount++
 		}
-
 		return txn.Set(countKey, helper.Uint64ToBytes(currentCount))
 	})
 }

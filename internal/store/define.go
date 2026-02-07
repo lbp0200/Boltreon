@@ -96,6 +96,11 @@ func (s *BoltreonStore) GetDB() *badger.DB {
 	return s.db
 }
 
+// FlushDB 删除数据库中的所有键
+func (s *BoltreonStore) FlushDB() error {
+	return s.db.DropAll()
+}
+
 // TypeOfKeyGet 用于生成存储类型的键
 func TypeOfKeyGet(strKey string) []byte {
 	bKey := []byte(strKey)
