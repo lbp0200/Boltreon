@@ -2,7 +2,6 @@ package store
 
 import (
 	"sync"
-	"time"
 
 	"github.com/lbp0200/Boltreon/internal/logger"
 )
@@ -252,51 +251,6 @@ func (psm *PubSubManager) RemoveSubscriber(subscriber *Subscriber) {
 	close(subscriber.MessageCh)
 }
 
-// matchPattern 匹配模式（简化实现，支持*通配符）
-func matchPattern(str, pattern string) bool {
-	// 简化实现，只支持*通配符
-	if pattern == "*" {
-		return true
-	}
-
-	// 简单的通配符匹配
-	patternParts := splitPattern(pattern)
-	strParts := splitPattern(str)
-
-	if len(patternParts) != len(strParts) {
-		return false
-	}
-
-	for i, part := range patternParts {
-		if part != "*" && part != strParts[i] {
-			return false
-		}
-	}
-
-	return true
-}
-
-// splitPattern 分割模式（简化实现）
-func splitPattern(pattern string) []string {
-	// 简化实现，按*分割
-	parts := make([]string, 0)
-	current := ""
-	for _, char := range pattern {
-		if char == '*' {
-			if current != "" {
-				parts = append(parts, current)
-				current = ""
-			}
-			parts = append(parts, "*")
-		} else {
-			current += string(char)
-		}
-	}
-	if current != "" {
-		parts = append(parts, current)
-	}
-	return parts
-}
 
 // GetChannels 获取所有频道
 func (psm *PubSubManager) GetChannels(pattern string) []string {

@@ -111,11 +111,8 @@ func (c *Cluster) AssignSlot(slot uint32, nodeID string) error {
 		return fmt.Errorf("node %s not found", nodeID)
 	}
 
-	// 从旧节点移除槽位
-	oldNode := c.Slots[slot]
-	if oldNode != nil {
-		// 更新旧节点的槽位范围（简化处理，实际应该合并范围）
-	}
+	// 从旧节点移除槽位（简化处理）
+	_ = c.Slots[slot]
 
 	c.Slots[slot] = node
 	node.AddSlotRange(slot, slot)

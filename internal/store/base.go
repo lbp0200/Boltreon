@@ -470,30 +470,30 @@ func (s *BoltreonStore) Rename(key, newKey string) error {
 			// 删除新键的所有相关数据
 			switch newKeyType {
 			case KeyTypeString:
-				txn.Delete(newTypeKey)
-				txn.Delete([]byte(s.stringKey(newKey)))
+				_ = txn.Delete(newTypeKey)
+				_ = txn.Delete([]byte(s.stringKey(newKey)))
 			case KeyTypeList:
 				if err := deleteByPrefix(txn, []byte(fmt.Sprintf("%s:%s:", KeyTypeList, newKey))); err != nil {
 					return err
 				}
-				txn.Delete(newTypeKey)
+				_ = txn.Delete(newTypeKey)
 			case KeyTypeHash:
 				if err := deleteByPrefix(txn, []byte(fmt.Sprintf("%s:%s:", KeyTypeHash, newKey))); err != nil {
 					return err
 				}
-				txn.Delete(newTypeKey)
+				_ = txn.Delete(newTypeKey)
 			case KeyTypeSet:
 				if err := deleteByPrefix(txn, []byte(fmt.Sprintf("%s:%s:", KeyTypeSet, newKey))); err != nil {
 					return err
 				}
-				txn.Delete(newTypeKey)
+				_ = txn.Delete(newTypeKey)
 			case KeyTypeSortedSet:
 				if err := deleteByPrefix(txn, []byte(fmt.Sprintf("%s%s:", prefixKeySortedSetBytes, newKey))); err != nil {
 					return err
 				}
-				txn.Delete(newTypeKey)
+				_ = txn.Delete(newTypeKey)
 			default:
-				txn.Delete(newTypeKey)
+				_ = txn.Delete(newTypeKey)
 			}
 		} else if !errors.Is(err, badger.ErrKeyNotFound) {
 			return err
@@ -537,8 +537,8 @@ func (s *BoltreonStore) Rename(key, newKey string) error {
 				}
 			}
 			// 删除旧键
-			txn.Delete(typeKey)
-			txn.Delete(oldValueKey)
+			_ = txn.Delete(typeKey)
+			_ = txn.Delete(oldValueKey)
 			return nil
 		case KeyTypeList:
 			// 复制所有LIST键

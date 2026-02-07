@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/lbp0200/Boltreon/internal/logger"
+	"github.com/lbp0200/Boltreon/internal/backup"
 	"github.com/lbp0200/Boltreon/internal/replication"
 	"github.com/lbp0200/Boltreon/internal/server"
 

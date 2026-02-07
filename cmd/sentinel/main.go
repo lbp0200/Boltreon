@@ -3,7 +3,6 @@ package main
 import (
 	"flag"
 	"net"
-	"os"
 	"time"
 
 	"github.com/lbp0200/Boltreon/internal/logger"

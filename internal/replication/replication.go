@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"sync"
-	"time"
 
 	"github.com/lbp0200/Boltreon/internal/logger"
 	"github.com/lbp0200/Boltreon/internal/store"

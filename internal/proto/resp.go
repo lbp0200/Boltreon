@@ -3,7 +3,6 @@ package proto
 
 import (
 	"bufio"
-	"bytes"
 	"fmt"
 	"io"
 	"strconv"
@@ -209,27 +208,6 @@ func readLine(r *bufio.Reader) ([]byte, error) {
 		line = line[:len(line)-1]
 	}
 	return line, nil
-}
-
-func readBulkString(r *bufio.Reader) ([]byte, error) {
-	line, err := readLine(r)
-	if err != nil {
-		return nil, err
-	}
-	if line[0] != '$' {
-		return nil, fmt.Errorf("expected $")
-	}
-	n, _ := strconv.Atoi(string(line[1:]))
-	if n == -1 {
-		_, _ = readLine(r) // 跳 \r\n
-		return nil, nil
-	}
-	buf := bytes.NewBuffer(make([]byte, 0, n))
-	if _, err := io.CopyN(buf, r, int64(n)); err != nil {
-		return nil, err
-	}
-	_, _ = readLine(r) // 跳 \r\n
-	return buf.Bytes(), nil
 }
 
 func joinBulkStrings(args [][]byte) string {

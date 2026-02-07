@@ -56,23 +56,6 @@ func (s *BoltreonStore) listLength(key string) (uint64, error) {
 	return length, errView
 }
 
-// store/badger_store.go
-func (s *BoltreonStore) listCreate(key string) error {
-	return s.db.Update(func(txn *badger.Txn) error {
-		// 初始化链表元数据
-		lengthKey := s.listKey(key, "length")
-		if err := txn.Set([]byte(lengthKey), helper.Uint64ToBytes(0)); err != nil {
-			return err
-		}
-		startKey := s.listKey(key, "start")
-		if err := txn.Set([]byte(startKey), []byte{}); err != nil {
-			return err
-		}
-		endKey := s.listKey(key, "end")
-		return txn.Set([]byte(endKey), []byte{})
-	})
-}
-
 func (s *BoltreonStore) listGetMeta(keyRedis string) (length uint64, start, end string, err error) {
 	err = s.db.View(func(txn *badger.Txn) error {
 		// 获取长度

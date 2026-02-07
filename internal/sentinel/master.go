@@ -1,7 +1,6 @@
 package sentinel
 
 import (
-	"fmt"
 	"sync"
 	"time"
 

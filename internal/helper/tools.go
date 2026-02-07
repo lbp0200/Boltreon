@@ -45,7 +45,7 @@ func BytesToFloat64(b []byte) (float64, error) {
 // Float64ToBytes 将 float64 转换为字节数组
 func Float64ToBytes(f float64) []byte {
 	buf := new(bytes.Buffer)
-	binary.Write(buf, binary.LittleEndian, f)
+	_ = binary.Write(buf, binary.LittleEndian, f)
 	return buf.Bytes()
 }
 func InterfaceToBytes(data interface{}) ([]byte, error) {

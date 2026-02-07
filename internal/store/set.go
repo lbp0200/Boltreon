@@ -224,7 +224,6 @@ func (s *BoltreonStore) SPop(key string) (string, error) {
 		}
 
 		// 随机选择一个索引（0 到 count-1）
-		rand.Seed(time.Now().UnixNano())
 		targetIndex := rand.Intn(int(count))
 
 		// 使用迭代器遍历到目标索引位置
@@ -284,7 +283,6 @@ func (s *BoltreonStore) SPopN(key string, count int) ([]string, error) {
 		}
 
 		// 随机选择成员
-		rand.Seed(time.Now().UnixNano())
 		rand.Shuffle(len(allMembers), func(i, j int) {
 			allMembers[i], allMembers[j] = allMembers[j], allMembers[i]
 		})
@@ -330,7 +328,6 @@ func (s *BoltreonStore) SRandMember(key string) (string, error) {
 		}
 
 		// 随机选择一个成员
-		rand.Seed(time.Now().UnixNano())
 		index := rand.Intn(len(members))
 		member = members[index]
 		return nil
@@ -353,7 +350,6 @@ func (s *BoltreonStore) SRandMemberN(key string, count int) ([]string, error) {
 		// 如果count为负数，允许重复
 		if count < 0 {
 			count = -count
-			rand.Seed(time.Now().UnixNano())
 			for i := 0; i < count; i++ {
 				index := rand.Intn(len(allMembers))
 				members = append(members, allMembers[index])
@@ -364,7 +360,6 @@ func (s *BoltreonStore) SRandMemberN(key string, count int) ([]string, error) {
 				count = len(allMembers)
 			}
 			// 随机选择不重复的成员
-			rand.Seed(time.Now().UnixNano())
 			rand.Shuffle(len(allMembers), func(i, j int) {
 				allMembers[i], allMembers[j] = allMembers[j], allMembers[i]
 			})

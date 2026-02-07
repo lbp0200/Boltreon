@@ -92,12 +92,6 @@ func (enc *RDBEncoder) WriteKeyValue(key string, value interface{}, keyType stri
 			enc.writeString(field)
 			enc.writeBytes(val)
 		}
-	case []string:
-		// Set
-		enc.writeLength(uint64(len(v)))
-		for _, member := range v {
-			enc.writeString(member)
-		}
 	default:
 		return fmt.Errorf("unsupported value type")
 	}
@@ -293,7 +287,7 @@ func GenerateRDB(s *store.BoltreonStore) ([]byte, error) {
 				}
 				enc.WriteSetKeyValue(key, members, ttl)
 
-			case store.KeyTypeSortedSet, "zset":
+			case store.KeyTypeSortedSet:
 				// SortedSet需要特殊处理
 				members, err := s.ZRange(key, 0, -1)
 				if err != nil {

@@ -3,7 +3,6 @@ package replication
 import (
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/lbp0200/Boltreon/internal/logger"
 	"github.com/lbp0200/Boltreon/internal/proto"
@@ -162,18 +161,9 @@ func StartSlaveReplication(rm *ReplicationManager, store *store.BoltreonStore, m
 			return
 		}
 
-		resp, err = masterConn.ReadResponse()
-		if err != nil {
-			logger.Logger.Error().Err(err).Msg("读取REPLCONF响应失败")
-			return
-		}
+		_, _ = masterConn.ReadResponse()
 
 		// 发送PSYNC
-		rm.mu.RLock()
-		replId := rm.replId
-		offset := rm.masterReplOffset
-		rm.mu.RUnlock()
-
 		if err := masterConn.SendCommand([][]byte{
 			[]byte("PSYNC"),
 			[]byte("?"),

@@ -19,11 +19,7 @@ const (
 )
 
 var (
-	prefixKeyTypeBytes   = []byte("TYPE_")
-	prefixKeyStringBytes = []byte("STRING_")
-	prefixKeyListBytes   = []byte("LIST_")
-	prefixKeyHashBytes   = []byte("HASH_")
-	prefixKeySetBytes    = []byte("SET_")
+	prefixKeyTypeBytes = []byte("TYPE_")
 	//prefixKeySortedSetBytes = []byte("SORTEDSET_")
 )
 
@@ -104,11 +100,5 @@ func (s *BoltreonStore) GetDB() *badger.DB {
 func TypeOfKeyGet(strKey string) []byte {
 	bKey := []byte(strKey)
 	bKey = append(prefixKeyTypeBytes, bKey...)
-	return bKey
-}
-
-// keyBadgerGet 用于生成存储键的键
-func keyBadgerGet1(bType, bKey []byte) []byte {
-	bKey = append(bType, bKey...)
 	return bKey
 }

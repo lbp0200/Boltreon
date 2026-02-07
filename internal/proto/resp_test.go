@@ -1,0 +1,366 @@
+package proto
+
+import (
+	"bufio"
+	"bytes"
+	"testing"
+
+	"github.com/zeebo/assert"
+)
+
+func TestArrayString(t *testing.T) {
+	tests := []struct {
+		name     string
+		args     [][]byte
+		expected string
+	}{
+		{
+			name:     "empty array",
+			args:     [][]byte{},
+			expected: "*0\r\n",
+		},
+		{
+			name:     "single element",
+			args:     [][]byte{[]byte("GET")},
+			expected: "*1\r\n$3\r\nGET\r\n",
+		},
+		{
+			name:     "two elements",
+			args:     [][]byte{[]byte("SET"), []byte("key"), []byte("value")},
+			expected: "*3\r\n$3\r\nSET\r\n$3\r\nkey\r\n$5\r\nvalue\r\n",
+		},
+		{
+			name:     "nil element",
+			args:     [][]byte{[]byte("CMD"), nil},
+			expected: "*2\r\n$3\r\nCMD\r\n$-1\r\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			a := &Array{Args: tt.args}
+			result := a.String()
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestBulkString(t *testing.T) {
+	tests := []struct {
+		name     string
+		data     []byte
+		expected string
+	}{
+		{
+			name:     "normal string",
+			data:     []byte("hello"),
+			expected: "$5\r\nhello\r\n",
+		},
+		{
+			name:     "empty string",
+			data:     []byte(""),
+			expected: "$0\r\n\r\n",
+		},
+		{
+			name:     "nil",
+			data:     nil,
+			expected: "$-1\r\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			bs := BulkString(tt.data)
+			result := bs.String()
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestSimpleString(t *testing.T) {
+	tests := []struct {
+		name     string
+		s        SimpleString
+		expected string
+	}{
+		{name: "OK", s: SimpleString("OK"), expected: "+OK\r\n"},
+		{name: "PONG", s: SimpleString("PONG"), expected: "+PONG\r\n"},
+		{name: "empty", s: SimpleString(""), expected: "+\r\n"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := tt.s.String()
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestError(t *testing.T) {
+	tests := []struct {
+		name     string
+		e        Error
+		expected string
+	}{
+		{name: "ERR", e: Error("ERR"), expected: "-ERR\r\n"},
+		{name: "not found", e: Error("not found"), expected: "-not found\r\n"},
+		{name: "custom", e: Error("WRONGTYPE Operation"), expected: "-WRONGTYPE Operation\r\n"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := tt.e.String()
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestInteger(t *testing.T) {
+	tests := []struct {
+		name     string
+		i        Integer
+		expected string
+	}{
+		{name: "zero", i: Integer(0), expected: ":0\r\n"},
+		{name: "positive", i: Integer(100), expected: ":100\r\n"},
+		{name: "negative", i: Integer(-50), expected: ":-50\r\n"},
+		{name: "large", i: Integer(999999), expected: ":999999\r\n"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := tt.i.String()
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestReadRESPArray(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected *Array
+		wantErr  bool
+	}{
+		{
+			name:  "simple command",
+			input: "*3\r\n$3\r\nSET\r\n$3\r\nkey\r\n$5\r\nvalue\r\n",
+			expected: &Array{Args: [][]byte{[]byte("SET"), []byte("key"), []byte("value")}},
+			wantErr:  false,
+		},
+		{
+			name:     "empty array",
+			input:    "*0\r\n",
+			expected: &Array{Args: [][]byte{}},
+			wantErr:  false,
+		},
+		{
+			name:  "command with nil",
+			input: "*2\r\n$3\r\nCMD\r\n$-1\r\n",
+			expected: &Array{Args: [][]byte{[]byte("CMD"), nil}},
+			wantErr:  false,
+		},
+		{
+			name:     "inline PING",
+			input:    "PING\r\n",
+			expected: &Array{Args: [][]byte{[]byte("PING")}},
+			wantErr:  false,
+		},
+		{
+			name:     "inline GET key",
+			input:    "GET key\r\n",
+			expected: &Array{Args: [][]byte{[]byte("GET"), []byte("key")}},
+			wantErr:  false,
+		},
+		{
+			name:     "inline SET key value",
+			input:    "SET key value\r\n",
+			expected: &Array{Args: [][]byte{[]byte("SET"), []byte("key"), []byte("value")}},
+			wantErr:  false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := bufio.NewReader(bytes.NewBufferString(tt.input))
+			result, err := ReadRESP(r)
+
+			if tt.wantErr {
+				assert.Error(t, err)
+				return
+			}
+
+			assert.NoError(t, err)
+			assert.NotNil(t, result)
+			assert.Equal(t, len(tt.expected.Args), len(result.Args))
+
+			for i, arg := range tt.expected.Args {
+				if arg == nil {
+					assert.Nil(t, result.Args[i])
+				} else {
+					assert.Equal(t, string(arg), string(result.Args[i]))
+				}
+			}
+		})
+	}
+}
+
+func TestWriteRESP(t *testing.T) {
+	tests := []struct {
+		name     string
+		resp     RESP
+		expected string
+	}{
+		{
+			name:     "simple string",
+			resp:     NewSimpleString("OK"),
+			expected: "+OK\r\n",
+		},
+		{
+			name:     "integer",
+			resp:     NewInteger(100),
+			expected: ":100\r\n",
+		},
+		{
+			name:     "bulk string",
+			resp:     NewBulkString([]byte("hello")),
+			expected: "$5\r\nhello\r\n",
+		},
+		{
+			name:     "error",
+			resp:     NewError("ERR"),
+			expected: "-ERR\r\n",
+		},
+		{
+			name:     "array",
+			resp:     &Array{Args: [][]byte{[]byte("OK")}},
+			expected: "*1\r\n$2\r\nOK\r\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			err := WriteRESP(&buf, tt.resp)
+			assert.NoError(t, err)
+			assert.Equal(t, tt.expected, buf.String())
+		})
+	}
+}
+
+func TestParseInlineCommand(t *testing.T) {
+	tests := []struct {
+		name     string
+		line     []byte
+		expected *Array
+	}{
+		{
+			name:     "PING",
+			line:     []byte("PING"),
+			expected: &Array{Args: [][]byte{[]byte("PING")}},
+		},
+		{
+			name:     "GET key",
+			line:     []byte("GET key"),
+			expected: &Array{Args: [][]byte{[]byte("GET"), []byte("key")}},
+		},
+		{
+			name:     "SET key value EX 100",
+			line:     []byte("SET key value EX 100"),
+			expected: &Array{Args: [][]byte{[]byte("SET"), []byte("key"), []byte("value"), []byte("EX"), []byte("100")}},
+		},
+		{
+			name:     "multiple spaces",
+			line:     []byte("GET   key"),
+			expected: &Array{Args: [][]byte{[]byte("GET"), []byte("key")}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := parseInlineCommand(tt.line)
+			assert.NoError(t, err)
+			assert.NotNil(t, result)
+			assert.Equal(t, len(tt.expected.Args), len(result.Args))
+		})
+	}
+}
+
+func TestJoinBulkStrings(t *testing.T) {
+	tests := []struct {
+		name     string
+		args     [][]byte
+		expected string
+	}{
+		{
+			name:     "empty",
+			args:     [][]byte{},
+			expected: "",
+		},
+		{
+			name:     "single",
+			args:     [][]byte{[]byte("hello")},
+			expected: "$5\r\nhello\r\n",
+		},
+		{
+			name:     "multiple",
+			args:     [][]byte{[]byte("a"), []byte("bb"), []byte("ccc")},
+			expected: "$1\r\na\r\n$2\r\nbb\r\n$3\r\nccc\r\n",
+		},
+		{
+			name:     "with nil",
+			args:     [][]byte{[]byte("a"), nil, []byte("b")},
+			expected: "$1\r\na\r\n$-1\r\n$1\r\nb\r\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := joinBulkStrings(tt.args)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestNewFactoryFunctions(t *testing.T) {
+	// Test factory functions
+	ss := NewSimpleString("test")
+	assert.Equal(t, "+test\r\n", ss.String())
+
+	bs := NewBulkString([]byte("bulk"))
+	assert.Equal(t, "$4\r\nbulk\r\n", bs.String())
+
+	errResp := NewError("test error")
+	assert.Equal(t, "-test error\r\n", errResp.String())
+
+	i := NewInteger(42)
+	assert.Equal(t, ":42\r\n", i.String())
+
+	// Test nil bulk string
+	nilBS := NewBulkString(nil)
+	assert.Equal(t, "$-1\r\n", nilBS.String())
+
+	// Test OK constant
+	assert.Equal(t, "+OK\r\n", OK.String())
+}
+
+func TestTruncateString(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		maxLen   int
+		expected string
+	}{
+		{name: "short", input: "hello", maxLen: 10, expected: "hello"},
+		{name: "exact", input: "hello", maxLen: 5, expected: "hello"},
+		{name: "long", input: "hello world", maxLen: 8, expected: "hello wo..."},
+		{name: "empty", input: "", maxLen: 10, expected: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := truncateString(tt.input, tt.maxLen)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}

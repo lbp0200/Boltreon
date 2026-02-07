@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/lbp0200/Boltreon/internal/backup"
 	"github.com/lbp0200/Boltreon/internal/cluster"
 	"github.com/lbp0200/Boltreon/internal/logger"
 	"github.com/lbp0200/Boltreon/internal/proto"
@@ -20,6 +21,7 @@ type Handler struct {
 	Cluster     *cluster.Cluster
 	Replication *replication.ReplicationManager
 	Backup      *backup.BackupManager
+	PubSub      *store.PubSubManager
 }
 
 // ServeTCP 监听并处理连接

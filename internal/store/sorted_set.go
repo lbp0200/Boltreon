@@ -981,7 +981,7 @@ func (s *BoltreonStore) ZUnionStore(destination string, keys []string, weights [
 	}
 
 	// 删除目标集合的现有数据
-	s.ZSetDel(destination)
+	_ = s.ZSetDel(destination)
 
 	// 添加所有成员到目标集合
 	zsetMembers := make([]ZSetMember, 0, len(memberScores))
@@ -1002,7 +1002,7 @@ func (s *BoltreonStore) ZUnionStore(destination string, keys []string, weights [
 func (s *BoltreonStore) ZInterStore(destination string, keys []string, weights []float64, aggregate string) (int64, error) {
 	if len(keys) == 0 {
 		// 删除目标集合
-		s.ZSetDel(destination)
+		_ = s.ZSetDel(destination)
 		return 0, nil
 	}
 
@@ -1065,7 +1065,7 @@ func (s *BoltreonStore) ZInterStore(destination string, keys []string, weights [
 	}
 
 	// 删除目标集合的现有数据
-	s.ZSetDel(destination)
+	_ = s.ZSetDel(destination)
 
 	// 添加所有成员到目标集合
 	zsetMembers := make([]ZSetMember, 0, len(memberScores))
@@ -1086,7 +1086,7 @@ func (s *BoltreonStore) ZInterStore(destination string, keys []string, weights [
 func (s *BoltreonStore) ZDiffStore(destination string, keys []string) (int64, error) {
 	if len(keys) == 0 {
 		// 删除目标集合
-		s.ZSetDel(destination)
+		_ = s.ZSetDel(destination)
 		return 0, nil
 	}
 
@@ -1117,7 +1117,7 @@ func (s *BoltreonStore) ZDiffStore(destination string, keys []string) (int64, er
 	}
 
 	// 删除目标集合的现有数据
-	s.ZSetDel(destination)
+	_ = s.ZSetDel(destination)
 
 	// 添加所有成员到目标集合
 	if len(zsetMembers) > 0 {
