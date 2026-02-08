@@ -6,7 +6,7 @@ import (
 	"github.com/zeebo/assert"
 )
 
-func setupListTest(t *testing.T) *BoltreonStore {
+func setupListTest(t *testing.T) *BotreonStore {
 	dbPath := t.TempDir()
 	store, err := NewBadgerStore(dbPath)
 	assert.NoError(t, err)

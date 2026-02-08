@@ -5,12 +5,12 @@ import (
 	"net"
 	"os"
 
-	"github.com/lbp0200/Boltreon/internal/logger"
-	"github.com/lbp0200/Boltreon/internal/backup"
-	"github.com/lbp0200/Boltreon/internal/replication"
-	"github.com/lbp0200/Boltreon/internal/server"
+	"github.com/lbp0200/Botreon/internal/logger"
+	"github.com/lbp0200/Botreon/internal/backup"
+	"github.com/lbp0200/Botreon/internal/replication"
+	"github.com/lbp0200/Botreon/internal/server"
 
-	"github.com/lbp0200/Boltreon/internal/store"
+	"github.com/lbp0200/Botreon/internal/store"
 )
 
 func main() {
@@ -24,7 +24,7 @@ func main() {
 		logger.SetLevelFromString(*logLevel)
 	}
 
-	db, err := store.NewBoltreonStore(*dbPath)
+	db, err := store.NewBotreonStore(*dbPath)
 	if err != nil {
 		logger.Logger.Fatal().Err(err).Msg("Failed to create store")
 	}
@@ -51,7 +51,7 @@ func main() {
 		logger.Logger.Fatal().Err(err).Str("addr", *addr).Msg("Failed to listen")
 	}
 	// 启动信息使用 WARN 级别，确保默认配置下也能显示
-	logger.Warning("Boltreon 服务器启动，监听地址: %s", *addr)
+	logger.Warning("Botreon 服务器启动，监听地址: %s", *addr)
 	logger.Warning("当前日志级别: %s", logger.GetLevelString())
 	if err := handler.ServeTCP(ln); err != nil {
 		logger.Logger.Fatal().Err(err).Msg("Server failed")

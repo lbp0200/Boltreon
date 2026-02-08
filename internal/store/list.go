@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/lbp0200/Boltreon/internal/helper"
+	"github.com/lbp0200/Botreon/internal/helper"
 
 	"github.com/dgraph-io/badger/v4"
 	"github.com/google/uuid"
@@ -27,14 +27,14 @@ type ListNode struct {
 // key 是链表的主键，以字节切片形式传入
 // parts 是可变参数，用于拼接更多的键信息
 // 返回一个字节切片，作为存储在数据库中的完整键
-func (s *BoltreonStore) listKey(key string, parts ...string) string {
+func (s *BotreonStore) listKey(key string, parts ...string) string {
 	return fmt.Sprintf("%s:%s:%s", KeyTypeList, key, strings.Join(parts, ":"))
 }
 
 // listLength 方法用于获取链表的长度
 // key 是链表的主键，以字节切片形式传入
 // 返回链表的长度（无符号 64 位整数）和可能出现的错误
-func (s *BoltreonStore) listLength(key string) (uint64, error) {
+func (s *BotreonStore) listLength(key string) (uint64, error) {
 	var length uint64
 	errView := s.db.View(func(txn *badger.Txn) error {
 		// 获取长度
@@ -56,7 +56,7 @@ func (s *BoltreonStore) listLength(key string) (uint64, error) {
 	return length, errView
 }
 
-func (s *BoltreonStore) listGetMeta(keyRedis string) (length uint64, start, end string, err error) {
+func (s *BotreonStore) listGetMeta(keyRedis string) (length uint64, start, end string, err error) {
 	err = s.db.View(func(txn *badger.Txn) error {
 		// 获取长度
 		lengthItem, errGet := txn.Get([]byte(s.listKey(keyRedis, "length")))
@@ -93,7 +93,7 @@ func (s *BoltreonStore) listGetMeta(keyRedis string) (length uint64, start, end 
 	return
 }
 
-func (s *BoltreonStore) listUpdateMeta(txn *badger.Txn, key string, length uint64, start, end string) error {
+func (s *BotreonStore) listUpdateMeta(txn *badger.Txn, key string, length uint64, start, end string) error {
 	// 更新长度
 	if err := txn.Set([]byte(s.listKey(key, "length")), helper.Uint64ToBytes(length)); err != nil {
 		return err
@@ -106,7 +106,7 @@ func (s *BoltreonStore) listUpdateMeta(txn *badger.Txn, key string, length uint6
 	return txn.Set([]byte(s.listKey(key, "end")), []byte(end))
 }
 
-func (s *BoltreonStore) createNode(txn *badger.Txn, key string, value []byte) (string, error) {
+func (s *BotreonStore) createNode(txn *badger.Txn, key string, value []byte) (string, error) {
 	nodeID := uuid.New().String()
 	nodeKey := s.listKey(key, nodeID)
 	if err := txn.Set([]byte(nodeKey), value); err != nil {
@@ -115,7 +115,7 @@ func (s *BoltreonStore) createNode(txn *badger.Txn, key string, value []byte) (s
 	return nodeID, nil
 }
 
-func (s *BoltreonStore) linkNodes(txn *badger.Txn, key string, prevID, nextID string) error {
+func (s *BotreonStore) linkNodes(txn *badger.Txn, key string, prevID, nextID string) error {
 	// 更新前节点的next指针
 	if prevID != "" {
 		prevNextKey := s.listKey(key, prevID, "next")
@@ -132,7 +132,7 @@ func (s *BoltreonStore) linkNodes(txn *badger.Txn, key string, prevID, nextID st
 }
 
 // LPush Redis LPUSH 实现
-func (s *BoltreonStore) LPush(key string, values ...string) (int, error) {
+func (s *BotreonStore) LPush(key string, values ...string) (int, error) {
 	var finalLength uint64
 	err := s.db.Update(func(txn *badger.Txn) error {
 		if err := txn.Set(TypeOfKeyGet(key), []byte(KeyTypeList)); err != nil {
@@ -175,7 +175,7 @@ func (s *BoltreonStore) LPush(key string, values ...string) (int, error) {
 }
 
 // RPOP 实现
-func (s *BoltreonStore) RPop(key string) (string, error) {
+func (s *BotreonStore) RPop(key string) (string, error) {
 	var value string
 	err := s.db.Update(func(txn *badger.Txn) error {
 		length, start, end, err := s.listGetMeta(key)
@@ -236,13 +236,13 @@ func (s *BoltreonStore) RPop(key string) (string, error) {
 }
 
 // LLEN 实现
-func (s *BoltreonStore) LLen(key string) (uint64, error) {
+func (s *BotreonStore) LLen(key string) (uint64, error) {
 	length, err := s.listLength(key)
 	return length, err
 }
 
 // getNodeByIndex 根据索引获取节点ID和值
-func (s *BoltreonStore) getNodeByIndex(txn *badger.Txn, key string, index int64) (string, string, error) {
+func (s *BotreonStore) getNodeByIndex(txn *badger.Txn, key string, index int64) (string, string, error) {
 	length, start, _, err := s.listGetMeta(key)
 	if err != nil {
 		return "", "", err
@@ -315,7 +315,7 @@ func (s *BoltreonStore) getNodeByIndex(txn *badger.Txn, key string, index int64)
 }
 
 // RPUSH 实现 Redis RPUSH 命令
-func (s *BoltreonStore) RPush(key string, values ...string) (int, error) {
+func (s *BotreonStore) RPush(key string, values ...string) (int, error) {
 	var finalLength uint64
 	err := s.db.Update(func(txn *badger.Txn) error {
 		if err := txn.Set(TypeOfKeyGet(key), []byte(KeyTypeList)); err != nil {
@@ -358,7 +358,7 @@ func (s *BoltreonStore) RPush(key string, values ...string) (int, error) {
 }
 
 // LPOP 实现 Redis LPOP 命令
-func (s *BoltreonStore) LPop(key string) (string, error) {
+func (s *BotreonStore) LPop(key string) (string, error) {
 	var value string
 	err := s.db.Update(func(txn *badger.Txn) error {
 		length, start, end, err := s.listGetMeta(key)
@@ -418,7 +418,7 @@ func (s *BoltreonStore) LPop(key string) (string, error) {
 }
 
 // LINDEX 实现 Redis LINDEX 命令
-func (s *BoltreonStore) LIndex(key string, index int64) (string, error) {
+func (s *BotreonStore) LIndex(key string, index int64) (string, error) {
 	var value string
 	err := s.db.View(func(txn *badger.Txn) error {
 		_, val, err := s.getNodeByIndex(txn, key, index)
@@ -432,7 +432,7 @@ func (s *BoltreonStore) LIndex(key string, index int64) (string, error) {
 }
 
 // LRANGE 实现 Redis LRANGE 命令
-func (s *BoltreonStore) LRange(key string, start, stop int64) ([]string, error) {
+func (s *BotreonStore) LRange(key string, start, stop int64) ([]string, error) {
 	var result []string
 	err := s.db.View(func(txn *badger.Txn) error {
 		length, startID, _, err := s.listGetMeta(key)
@@ -514,7 +514,7 @@ func (s *BoltreonStore) LRange(key string, start, stop int64) ([]string, error) 
 }
 
 // LSET 实现 Redis LSET 命令
-func (s *BoltreonStore) LSet(key string, index int64, value string) error {
+func (s *BotreonStore) LSet(key string, index int64, value string) error {
 	return s.db.Update(func(txn *badger.Txn) error {
 		nodeID, _, err := s.getNodeByIndex(txn, key, index)
 		if err != nil {
@@ -531,7 +531,7 @@ func (s *BoltreonStore) LSet(key string, index int64, value string) error {
 }
 
 // LTRIM 实现 Redis LTRIM 命令
-func (s *BoltreonStore) LTrim(key string, start, stop int64) error {
+func (s *BotreonStore) LTrim(key string, start, stop int64) error {
 	return s.db.Update(func(txn *badger.Txn) error {
 		length, startID, _, err := s.listGetMeta(key)
 		if err != nil {
@@ -643,14 +643,14 @@ func (s *BoltreonStore) LTrim(key string, start, stop int64) error {
 }
 
 // deleteNode 删除一个节点
-func (s *BoltreonStore) deleteNode(txn *badger.Txn, key, nodeID string) {
+func (s *BotreonStore) deleteNode(txn *badger.Txn, key, nodeID string) {
 	txn.Delete([]byte(s.listKey(key, nodeID)))
 	txn.Delete([]byte(s.listKey(key, nodeID, "prev")))
 	txn.Delete([]byte(s.listKey(key, nodeID, "next")))
 }
 
 // deleteList 删除整个列表
-func (s *BoltreonStore) deleteList(txn *badger.Txn, key string) error {
+func (s *BotreonStore) deleteList(txn *badger.Txn, key string) error {
 	_, start, _, _ := s.listGetMeta(key)
 	if start != "" {
 		// 遍历删除所有节点
@@ -682,7 +682,7 @@ func (s *BoltreonStore) deleteList(txn *badger.Txn, key string) error {
 }
 
 // LINSERT 实现 Redis LINSERT 命令
-func (s *BoltreonStore) LInsert(key string, where string, pivot, value string) (int, error) {
+func (s *BotreonStore) LInsert(key string, where string, pivot, value string) (int, error) {
 	count := 0
 	err := s.db.Update(func(txn *badger.Txn) error {
 		length, start, _, err := s.listGetMeta(key)
@@ -804,7 +804,7 @@ func (s *BoltreonStore) LInsert(key string, where string, pivot, value string) (
 }
 
 // LREM 实现 Redis LREM 命令
-func (s *BoltreonStore) LRem(key string, count int64, value string) (int, error) {
+func (s *BotreonStore) LRem(key string, count int64, value string) (int, error) {
 	removed := 0
 	err := s.db.Update(func(txn *badger.Txn) error {
 		length, start, _, err := s.listGetMeta(key)
@@ -939,7 +939,7 @@ func (s *BoltreonStore) LRem(key string, count int64, value string) (int, error)
 }
 
 // RPOPLPUSH 实现 Redis RPOPLPUSH 命令
-func (s *BoltreonStore) RPopLPush(source, destination string) (string, error) {
+func (s *BotreonStore) RPopLPush(source, destination string) (string, error) {
 	var value string
 	err := s.db.Update(func(txn *badger.Txn) error {
 		// 从源列表弹出
@@ -1019,7 +1019,7 @@ func (s *BoltreonStore) RPopLPush(source, destination string) (string, error) {
 }
 
 // LPUSHX 实现 Redis LPUSHX 命令，仅当键存在时左推入
-func (s *BoltreonStore) LPUSHX(key string, values ...string) (int, error) {
+func (s *BotreonStore) LPUSHX(key string, values ...string) (int, error) {
 	// 先检查键是否存在且是List类型（在 View 事务中）
 	var isList bool
 	err := s.db.View(func(txn *badger.Txn) error {
@@ -1054,7 +1054,7 @@ func (s *BoltreonStore) LPUSHX(key string, values ...string) (int, error) {
 }
 
 // RPUSHX 实现 Redis RPUSHX 命令，仅当键存在时右推入
-func (s *BoltreonStore) RPUSHX(key string, values ...string) (int, error) {
+func (s *BotreonStore) RPUSHX(key string, values ...string) (int, error) {
 	// 先检查键是否存在且是List类型（在 View 事务中）
 	var isList bool
 	err := s.db.View(func(txn *badger.Txn) error {
@@ -1090,7 +1090,7 @@ func (s *BoltreonStore) RPUSHX(key string, values ...string) (int, error) {
 
 // BLPOP 实现 Redis BLPOP 命令，阻塞式左弹出（简化版本：非阻塞）
 // 注意：真正的阻塞操作需要额外的机制（如channel或条件变量），这里实现非阻塞版本
-func (s *BoltreonStore) BLPOP(keys []string, timeout int) (string, string, error) {
+func (s *BotreonStore) BLPOP(keys []string, timeout int) (string, string, error) {
 	// 简化实现：立即尝试从每个键弹出
 	for _, key := range keys {
 		value, err := s.LPop(key)
@@ -1103,7 +1103,7 @@ func (s *BoltreonStore) BLPOP(keys []string, timeout int) (string, string, error
 }
 
 // BRPOP 实现 Redis BRPOP 命令，阻塞式右弹出（简化版本：非阻塞）
-func (s *BoltreonStore) BRPOP(keys []string, timeout int) (string, string, error) {
+func (s *BotreonStore) BRPOP(keys []string, timeout int) (string, string, error) {
 	// 简化实现：立即尝试从每个键弹出
 	for _, key := range keys {
 		value, err := s.RPop(key)
@@ -1116,7 +1116,7 @@ func (s *BoltreonStore) BRPOP(keys []string, timeout int) (string, string, error
 }
 
 // BRPOPLPUSH 实现 Redis BRPOPLPUSH 命令，阻塞式右弹出并左推入（简化版本：非阻塞）
-func (s *BoltreonStore) BRPOPLPUSH(source, destination string, timeout int) (string, error) {
+func (s *BotreonStore) BRPOPLPUSH(source, destination string, timeout int) (string, error) {
 	// 简化实现：立即尝试执行RPOPLPUSH
 	return s.RPopLPush(source, destination)
 }

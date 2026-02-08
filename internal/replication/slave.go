@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/lbp0200/Boltreon/internal/logger"
-	"github.com/lbp0200/Boltreon/internal/proto"
+	"github.com/lbp0200/Botreon/internal/logger"
+	"github.com/lbp0200/Botreon/internal/proto"
 )
 
 // SlaveConnection 表示一个从节点连接

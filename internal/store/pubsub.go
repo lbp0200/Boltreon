@@ -3,7 +3,7 @@ package store
 import (
 	"sync"
 
-	"github.com/lbp0200/Boltreon/internal/logger"
+	"github.com/lbp0200/Botreon/internal/logger"
 )
 
 // PubSubManager Pub/Sub管理器

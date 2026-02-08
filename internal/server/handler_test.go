@@ -11,15 +11,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lbp0200/Boltreon/internal/proto"
-	"github.com/lbp0200/Boltreon/internal/store"
+	"github.com/lbp0200/Botreon/internal/proto"
+	"github.com/lbp0200/Botreon/internal/store"
 	"github.com/zeebo/assert"
 )
 
 // setupTestHandler 创建测试用的Handler
 func setupTestHandler(t *testing.T) *Handler {
 	dbPath := t.TempDir()
-	db, err := store.NewBoltreonStore(dbPath)
+	db, err := store.NewBotreonStore(dbPath)
 	assert.NoError(t, err)
 	return &Handler{Db: db}
 }

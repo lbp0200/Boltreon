@@ -14,12 +14,12 @@ import (
 var ErrKeyNotFound = errors.New("key not found")
 
 // stringKey 方法用于生成存储在 Badger 数据库中的键
-func (s *BoltreonStore) stringKey(key string) string {
+func (s *BotreonStore) stringKey(key string) string {
 	return fmt.Sprintf("%s:%s", KeyTypeString, key)
 }
 
 // Set 实现 Redis SET 命令
-func (s *BoltreonStore) Set(key string, value string) error {
+func (s *BotreonStore) Set(key string, value string) error {
 	// 先更新写缓存
 	if s.writeCache != nil {
 		s.writeCache.Set(key, []byte(value))
@@ -39,7 +39,7 @@ func (s *BoltreonStore) Set(key string, value string) error {
 }
 
 // SetWithTTL 字符串操作，设置键值对并设置过期时间
-func (s *BoltreonStore) SetWithTTL(key, value string, ttl time.Duration) error {
+func (s *BotreonStore) SetWithTTL(key, value string, ttl time.Duration) error {
 	return s.db.Update(func(txn *badger.Txn) error {
 		if err := txn.Set(TypeOfKeyGet(key), []byte(KeyTypeString)); err != nil {
 			return err
@@ -50,17 +50,17 @@ func (s *BoltreonStore) SetWithTTL(key, value string, ttl time.Duration) error {
 }
 
 // SetEX 实现 Redis SETEX 命令，设置键值对并设置过期时间（秒）
-func (s *BoltreonStore) SetEX(key string, value string, seconds int) error {
+func (s *BotreonStore) SetEX(key string, value string, seconds int) error {
 	return s.SetWithTTL(key, value, time.Duration(seconds)*time.Second)
 }
 
 // PSETEX 实现 Redis PSETEX 命令，设置键值对并设置过期时间（毫秒）
-func (s *BoltreonStore) PSETEX(key string, value string, milliseconds int64) error {
+func (s *BotreonStore) PSETEX(key string, value string, milliseconds int64) error {
 	return s.SetWithTTL(key, value, time.Duration(milliseconds)*time.Millisecond)
 }
 
 // SetNX 实现 Redis SETNX 命令，仅当键不存在时设置
-func (s *BoltreonStore) SetNX(key string, value string) (bool, error) {
+func (s *BotreonStore) SetNX(key string, value string) (bool, error) {
 	success := false
 	err := s.db.Update(func(txn *badger.Txn) error {
 		strKey := s.stringKey(key)
@@ -86,7 +86,7 @@ func (s *BoltreonStore) SetNX(key string, value string) (bool, error) {
 }
 
 // GetSet 实现 Redis GETSET 命令，设置新值并返回旧值
-func (s *BoltreonStore) GetSet(key string, value string) (string, error) {
+func (s *BotreonStore) GetSet(key string, value string) (string, error) {
 	// 先读取旧值（在 View 事务中）
 	var oldValue string
 	err := s.db.View(func(txn *badger.Txn) error {
@@ -111,7 +111,7 @@ func (s *BoltreonStore) GetSet(key string, value string) (string, error) {
 }
 
 // MGet 实现 Redis MGET 命令，获取多个键的值
-func (s *BoltreonStore) MGet(keys ...string) ([]string, error) {
+func (s *BotreonStore) MGet(keys ...string) ([]string, error) {
 	values := make([]string, len(keys))
 	err := s.db.View(func(txn *badger.Txn) error {
 		for i, key := range keys {
@@ -136,7 +136,7 @@ func (s *BoltreonStore) MGet(keys ...string) ([]string, error) {
 }
 
 // MSet 实现 Redis MSET 命令，设置多个键值对
-func (s *BoltreonStore) MSet(keyValues ...string) error {
+func (s *BotreonStore) MSet(keyValues ...string) error {
 	if len(keyValues)%2 != 0 {
 		return errors.New("MSET requires an even number of arguments")
 	}
@@ -157,7 +157,7 @@ func (s *BoltreonStore) MSet(keyValues ...string) error {
 }
 
 // MSetNX 实现 Redis MSETNX 命令，仅当所有键都不存在时设置多个键值对
-func (s *BoltreonStore) MSetNX(keyValues ...string) (bool, error) {
+func (s *BotreonStore) MSetNX(keyValues ...string) (bool, error) {
 	if len(keyValues)%2 != 0 {
 		return false, errors.New("MSETNX requires an even number of arguments")
 	}
@@ -195,7 +195,7 @@ func (s *BoltreonStore) MSetNX(keyValues ...string) (bool, error) {
 }
 
 // Get 实现 Redis GET 命令
-func (s *BoltreonStore) Get(key string) (string, error) {
+func (s *BotreonStore) Get(key string) (string, error) {
 	// 先检查读缓存
 	if s.readCache != nil {
 		if cachedValue, found := s.readCache.Get(key); found {
@@ -233,7 +233,7 @@ func (s *BoltreonStore) Get(key string) (string, error) {
 }
 
 // getIntValue 获取整数值，如果键不存在或不是整数，返回0和错误
-func (s *BoltreonStore) getIntValue(txn *badger.Txn, key string) (int64, error) {
+func (s *BotreonStore) getIntValue(txn *badger.Txn, key string) (int64, error) {
 	strKey := s.stringKey(key)
 	item, err := txn.Get([]byte(strKey))
 	if err != nil {
@@ -254,7 +254,7 @@ func (s *BoltreonStore) getIntValue(txn *badger.Txn, key string) (int64, error) 
 }
 
 // setIntValue 设置整数值
-func (s *BoltreonStore) setIntValue(txn *badger.Txn, key string, value int64) error {
+func (s *BotreonStore) setIntValue(txn *badger.Txn, key string, value int64) error {
 	if err := txn.Set(TypeOfKeyGet(key), []byte(KeyTypeString)); err != nil {
 		return err
 	}
@@ -263,7 +263,7 @@ func (s *BoltreonStore) setIntValue(txn *badger.Txn, key string, value int64) er
 }
 
 // INCR 实现 Redis INCR 命令，将键的值加1
-func (s *BoltreonStore) INCR(key string) (int64, error) {
+func (s *BotreonStore) INCR(key string) (int64, error) {
 	var newValue int64
 	err := s.db.Update(func(txn *badger.Txn) error {
 		oldValue, err := s.getIntValue(txn, key)
@@ -277,7 +277,7 @@ func (s *BoltreonStore) INCR(key string) (int64, error) {
 }
 
 // INCRBY 实现 Redis INCRBY 命令，将键的值增加指定整数
-func (s *BoltreonStore) INCRBY(key string, increment int64) (int64, error) {
+func (s *BotreonStore) INCRBY(key string, increment int64) (int64, error) {
 	var newValue int64
 	err := s.db.Update(func(txn *badger.Txn) error {
 		oldValue, err := s.getIntValue(txn, key)
@@ -291,17 +291,17 @@ func (s *BoltreonStore) INCRBY(key string, increment int64) (int64, error) {
 }
 
 // DECR 实现 Redis DECR 命令，将键的值减1
-func (s *BoltreonStore) DECR(key string) (int64, error) {
+func (s *BotreonStore) DECR(key string) (int64, error) {
 	return s.INCRBY(key, -1)
 }
 
 // DECRBY 实现 Redis DECRBY 命令，将键的值减少指定整数
-func (s *BoltreonStore) DECRBY(key string, decrement int64) (int64, error) {
+func (s *BotreonStore) DECRBY(key string, decrement int64) (int64, error) {
 	return s.INCRBY(key, -decrement)
 }
 
 // getFloatValue 获取浮点数值
-func (s *BoltreonStore) getFloatValue(txn *badger.Txn, key string) (float64, error) {
+func (s *BotreonStore) getFloatValue(txn *badger.Txn, key string) (float64, error) {
 	strKey := s.stringKey(key)
 	item, err := txn.Get([]byte(strKey))
 	if err != nil {
@@ -322,7 +322,7 @@ func (s *BoltreonStore) getFloatValue(txn *badger.Txn, key string) (float64, err
 }
 
 // setFloatValue 设置浮点数值
-func (s *BoltreonStore) setFloatValue(txn *badger.Txn, key string, value float64) error {
+func (s *BotreonStore) setFloatValue(txn *badger.Txn, key string, value float64) error {
 	if err := txn.Set(TypeOfKeyGet(key), []byte(KeyTypeString)); err != nil {
 		return err
 	}
@@ -333,7 +333,7 @@ func (s *BoltreonStore) setFloatValue(txn *badger.Txn, key string, value float64
 }
 
 // INCRBYFLOAT 实现 Redis INCRBYFLOAT 命令，将键的值增加指定浮点数
-func (s *BoltreonStore) INCRBYFLOAT(key string, increment float64) (float64, error) {
+func (s *BotreonStore) INCRBYFLOAT(key string, increment float64) (float64, error) {
 	// 先读取旧值（在 View 事务中）
 	oldValue, err := s.Get(key)
 	if err != nil && !errors.Is(err, ErrKeyNotFound) {
@@ -351,7 +351,7 @@ func (s *BoltreonStore) INCRBYFLOAT(key string, increment float64) (float64, err
 }
 
 // APPEND 实现 Redis APPEND 命令，追加字符串
-func (s *BoltreonStore) APPEND(key string, value string) (int, error) {
+func (s *BotreonStore) APPEND(key string, value string) (int, error) {
 	// 先读取旧值（在 View 事务中）
 	var existingValue string
 	err := s.db.View(func(txn *badger.Txn) error {
@@ -378,7 +378,7 @@ func (s *BoltreonStore) APPEND(key string, value string) (int, error) {
 }
 
 // StrLen 实现 Redis STRLEN 命令，获取字符串长度
-func (s *BoltreonStore) StrLen(key string) (int, error) {
+func (s *BotreonStore) StrLen(key string) (int, error) {
 	var length int
 	err := s.db.View(func(txn *badger.Txn) error {
 		strKey := s.stringKey(key)
@@ -401,7 +401,7 @@ func (s *BoltreonStore) StrLen(key string) (int, error) {
 }
 
 // GetRange 实现 Redis GETRANGE 命令，获取字符串的子串
-func (s *BoltreonStore) GetRange(key string, start, end int) (string, error) {
+func (s *BotreonStore) GetRange(key string, start, end int) (string, error) {
 	var result string
 	err := s.db.View(func(txn *badger.Txn) error {
 		strKey := s.stringKey(key)
@@ -450,7 +450,7 @@ func (s *BoltreonStore) GetRange(key string, start, end int) (string, error) {
 }
 
 // SetRange 实现 Redis SETRANGE 命令，设置字符串的子串
-func (s *BoltreonStore) SetRange(key string, offset int, value string) (int, error) {
+func (s *BotreonStore) SetRange(key string, offset int, value string) (int, error) {
 	// 先读取旧值（在 View 事务中）
 	var existingValue string
 	err := s.db.View(func(txn *badger.Txn) error {
@@ -489,7 +489,7 @@ func (s *BoltreonStore) SetRange(key string, offset int, value string) (int, err
 }
 
 // getStringBytes 获取字符串的字节数组
-func (s *BoltreonStore) getStringBytes(txn *badger.Txn, key string) ([]byte, error) {
+func (s *BotreonStore) getStringBytes(txn *badger.Txn, key string) ([]byte, error) {
 	strKey := s.stringKey(key)
 	item, err := txn.Get([]byte(strKey))
 	if err != nil {
@@ -506,7 +506,7 @@ func (s *BoltreonStore) getStringBytes(txn *badger.Txn, key string) ([]byte, err
 }
 
 // GetBit 实现 Redis GETBIT 命令，获取指定位的值
-func (s *BoltreonStore) GetBit(key string, offset int) (int, error) {
+func (s *BotreonStore) GetBit(key string, offset int) (int, error) {
 	var bit int
 	err := s.db.View(func(txn *badger.Txn) error {
 		data, err := s.getStringBytes(txn, key)
@@ -530,7 +530,7 @@ func (s *BoltreonStore) GetBit(key string, offset int) (int, error) {
 }
 
 // SetBit 实现 Redis SETBIT 命令，设置指定位的值
-func (s *BoltreonStore) SetBit(key string, offset int, value int) (int, error) {
+func (s *BotreonStore) SetBit(key string, offset int, value int) (int, error) {
 	// 清除读缓存
 	if s.readCache != nil {
 		s.readCache.Delete(key)
@@ -572,7 +572,7 @@ func (s *BoltreonStore) SetBit(key string, offset int, value int) (int, error) {
 }
 
 // BitCount 实现 Redis BITCOUNT 命令，计算字符串中1的位数
-func (s *BoltreonStore) BitCount(key string, start, end int) (int, error) {
+func (s *BotreonStore) BitCount(key string, start, end int) (int, error) {
 	var count int
 	err := s.db.View(func(txn *badger.Txn) error {
 		data, err := s.getStringBytes(txn, key)
@@ -618,7 +618,7 @@ func (s *BoltreonStore) BitCount(key string, start, end int) (int, error) {
 }
 
 // BitOp 实现 Redis BITOP 命令，位操作
-func (s *BoltreonStore) BitOp(op string, destKey string, keys ...string) (int, error) {
+func (s *BotreonStore) BitOp(op string, destKey string, keys ...string) (int, error) {
 	// 清除读缓存
 	if s.readCache != nil {
 		s.readCache.Delete(destKey)
@@ -705,7 +705,7 @@ func (s *BoltreonStore) BitOp(op string, destKey string, keys ...string) (int, e
 }
 
 // BitPos 实现 Redis BITPOS 命令，查找第一个设置或清除的位
-func (s *BoltreonStore) BitPos(key string, bit int, start, end int) (int, error) {
+func (s *BotreonStore) BitPos(key string, bit int, start, end int) (int, error) {
 	var pos int = -1
 	err := s.db.View(func(txn *badger.Txn) error {
 		data, err := s.getStringBytes(txn, key)

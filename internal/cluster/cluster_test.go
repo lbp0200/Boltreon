@@ -5,13 +5,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lbp0200/Boltreon/internal/store"
+	"github.com/lbp0200/Botreon/internal/store"
 	"github.com/zeebo/assert"
 )
 
 func setupTestCluster(t *testing.T) (*Cluster, func()) {
 	dbPath := t.TempDir()
-	s, err := store.NewBoltreonStore(dbPath)
+	s, err := store.NewBotreonStore(dbPath)
 	assert.NoError(t, err)
 
 	cluster, err := NewCluster(s, "", "127.0.0.1:6379")

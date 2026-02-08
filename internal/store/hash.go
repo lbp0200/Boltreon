@@ -6,14 +6,14 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/lbp0200/Boltreon/internal/helper"
+	"github.com/lbp0200/Botreon/internal/helper"
 
 	"github.com/dgraph-io/badger/v4"
 )
 
 // 哈希操作
-//func (s *BoltreonStore) HSet(key, field string, value interface{}) error {
-//	logFuncTag := "BoltreonStoreHSet"
+//func (s *BotreonStore) HSet(key, field string, value interface{}) error {
+//	logFuncTag := "BotreonStoreHSet"
 //	baggerTypeKey := TypeOfKeyGet(key)
 //	bValue, err := helper.InterfaceToBytes(value)
 //	if err != nil {
@@ -30,8 +30,8 @@ import (
 //}
 
 // 修改 HSet 维护计数器
-func (s *BoltreonStore) HSet(key, field string, value interface{}) error {
-	logFuncTag := "BoltreonStoreHSet"
+func (s *BotreonStore) HSet(key, field string, value interface{}) error {
+	logFuncTag := "BotreonStoreHSet"
 	// 将值转换为字符串（与Redis一致，Hash值都是字符串）
 	var bValue []byte
 	switch v := value.(type) {
@@ -107,7 +107,7 @@ func (s *BoltreonStore) HSet(key, field string, value interface{}) error {
 		return txn.Set(countKey, helper.Uint64ToBytes(currentCount))
 	})
 }
-func (s *BoltreonStore) HGet(key, field string) ([]byte, error) {
+func (s *BotreonStore) HGet(key, field string) ([]byte, error) {
 	hkey := s.hashKey(key, field)
 	var val []byte
 	err := s.db.View(func(txn *badger.Txn) error {
@@ -121,17 +121,17 @@ func (s *BoltreonStore) HGet(key, field string) ([]byte, error) {
 	return val, err
 }
 
-func (s *BoltreonStore) hashKey(key, field string) []byte {
+func (s *BotreonStore) hashKey(key, field string) []byte {
 	return []byte(fmt.Sprintf("%s:%s:%s", KeyTypeHash, key, field))
 }
 
 // hashCountKey 方法用于生成哈希表计数器键
-func (s *BoltreonStore) hashCountKey(key string) []byte {
+func (s *BotreonStore) hashCountKey(key string) []byte {
 	return []byte(fmt.Sprintf("%s:%s:__count__", KeyTypeHash, key))
 }
 
 // HDel 实现 Redis HDEL 命令
-func (s *BoltreonStore) HDel(key string, fields ...string) (int, error) {
+func (s *BotreonStore) HDel(key string, fields ...string) (int, error) {
 	deletedCount := 0
 	err := s.db.Update(func(txn *badger.Txn) error {
 		countKey := s.hashCountKey(key)
@@ -171,7 +171,7 @@ func (s *BoltreonStore) HDel(key string, fields ...string) (int, error) {
 }
 
 // HLen 实现 Redis HLEN 命令
-func (s *BoltreonStore) HLen(key string) (uint64, error) {
+func (s *BotreonStore) HLen(key string) (uint64, error) {
 	var count uint64
 	err := s.db.View(func(txn *badger.Txn) error {
 		countKey := s.hashCountKey(key)
@@ -193,7 +193,7 @@ func (s *BoltreonStore) HLen(key string) (uint64, error) {
 }
 
 // HGetAll 实现 Redis HGETALL 命令
-func (s *BoltreonStore) HGetAll(key string) (map[string][]byte, error) {
+func (s *BotreonStore) HGetAll(key string) (map[string][]byte, error) {
 	result := make(map[string][]byte)
 	prefix := fmt.Sprintf("%s:%s:", KeyTypeHash, key)
 	err := s.db.View(func(txn *badger.Txn) error {
@@ -246,7 +246,7 @@ func splitHashKey(key []byte) (string, string) {
 }
 
 // getAllHashFields 获取哈希表中的所有字段
-func (s *BoltreonStore) getAllHashFields(txn *badger.Txn, key string) ([]string, error) {
+func (s *BotreonStore) getAllHashFields(txn *badger.Txn, key string) ([]string, error) {
 	var fields []string
 	prefix := fmt.Sprintf("%s:%s:", KeyTypeHash, key)
 	prefixBytes := []byte(prefix)
@@ -268,7 +268,7 @@ func (s *BoltreonStore) getAllHashFields(txn *badger.Txn, key string) ([]string,
 }
 
 // HExists 实现 Redis HEXISTS 命令，检查字段是否存在
-func (s *BoltreonStore) HExists(key, field string) (bool, error) {
+func (s *BotreonStore) HExists(key, field string) (bool, error) {
 	exists := false
 	err := s.db.View(func(txn *badger.Txn) error {
 		hkey := s.hashKey(key, field)
@@ -286,7 +286,7 @@ func (s *BoltreonStore) HExists(key, field string) (bool, error) {
 }
 
 // HKeys 实现 Redis HKEYS 命令，获取所有字段名
-func (s *BoltreonStore) HKeys(key string) ([]string, error) {
+func (s *BotreonStore) HKeys(key string) ([]string, error) {
 	var fields []string
 	err := s.db.View(func(txn *badger.Txn) error {
 		var err error
@@ -297,7 +297,7 @@ func (s *BoltreonStore) HKeys(key string) ([]string, error) {
 }
 
 // HVals 实现 Redis HVALS 命令，获取所有字段值
-func (s *BoltreonStore) HVals(key string) ([][]byte, error) {
+func (s *BotreonStore) HVals(key string) ([][]byte, error) {
 	var values [][]byte
 	prefix := fmt.Sprintf("%s:%s:", KeyTypeHash, key)
 	err := s.db.View(func(txn *badger.Txn) error {
@@ -327,7 +327,7 @@ func (s *BoltreonStore) HVals(key string) ([][]byte, error) {
 }
 
 // HMSet 实现 Redis HMSET 命令，批量设置多个字段
-func (s *BoltreonStore) HMSet(key string, fieldValues map[string]interface{}) error {
+func (s *BotreonStore) HMSet(key string, fieldValues map[string]interface{}) error {
 	typeKey := TypeOfKeyGet(key)
 	return s.db.Update(func(txn *badger.Txn) error {
 		if err := txn.Set(typeKey, []byte(KeyTypeHash)); err != nil {
@@ -402,7 +402,7 @@ func (s *BoltreonStore) HMSet(key string, fieldValues map[string]interface{}) er
 }
 
 // HMGet 实现 Redis HMGET 命令，批量获取多个字段值
-func (s *BoltreonStore) HMGet(key string, fields ...string) ([][]byte, error) {
+func (s *BotreonStore) HMGet(key string, fields ...string) ([][]byte, error) {
 	values := make([][]byte, len(fields))
 	err := s.db.View(func(txn *badger.Txn) error {
 		for i, field := range fields {
@@ -427,7 +427,7 @@ func (s *BoltreonStore) HMGet(key string, fields ...string) ([][]byte, error) {
 }
 
 // HSetNX 实现 Redis HSETNX 命令，仅当字段不存在时设置
-func (s *BoltreonStore) HSetNX(key, field string, value interface{}) (bool, error) {
+func (s *BotreonStore) HSetNX(key, field string, value interface{}) (bool, error) {
 	success := false
 	typeKey := TypeOfKeyGet(key)
 	// 将值转换为字符串（与Redis一致）
@@ -500,7 +500,7 @@ func (s *BoltreonStore) HSetNX(key, field string, value interface{}) (bool, erro
 }
 
 // HIncrBy 实现 Redis HINCRBY 命令，将字段值增加整数
-func (s *BoltreonStore) HIncrBy(key, field string, increment int64) (int64, error) {
+func (s *BotreonStore) HIncrBy(key, field string, increment int64) (int64, error) {
 	var result int64
 	typeKey := TypeOfKeyGet(key)
 	err := s.db.Update(func(txn *badger.Txn) error {
@@ -565,7 +565,7 @@ func (s *BoltreonStore) HIncrBy(key, field string, increment int64) (int64, erro
 }
 
 // HIncrByFloat 实现 Redis HINCRBYFLOAT 命令，将字段值增加浮点数
-func (s *BoltreonStore) HIncrByFloat(key, field string, increment float64) (float64, error) {
+func (s *BotreonStore) HIncrByFloat(key, field string, increment float64) (float64, error) {
 	var result float64
 	typeKey := TypeOfKeyGet(key)
 	err := s.db.Update(func(txn *badger.Txn) error {
@@ -630,7 +630,7 @@ func (s *BoltreonStore) HIncrByFloat(key, field string, increment float64) (floa
 }
 
 // HStrLen 实现 Redis HSTRLEN 命令，获取字段值的字符串长度
-func (s *BoltreonStore) HStrLen(key, field string) (int, error) {
+func (s *BotreonStore) HStrLen(key, field string) (int, error) {
 	var length int
 	err := s.db.View(func(txn *badger.Txn) error {
 		hkey := s.hashKey(key, field)

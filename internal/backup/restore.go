@@ -5,17 +5,17 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/lbp0200/Boltreon/internal/logger"
-	"github.com/lbp0200/Boltreon/internal/store"
+	"github.com/lbp0200/Botreon/internal/logger"
+	"github.com/lbp0200/Botreon/internal/store"
 )
 
 // RestoreManager 备份恢复管理器
 type RestoreManager struct {
-	store *store.BoltreonStore
+	store *store.BotreonStore
 }
 
 // NewRestoreManager 创建新的恢复管理器
-func NewRestoreManager(store *store.BoltreonStore) *RestoreManager {
+func NewRestoreManager(store *store.BotreonStore) *RestoreManager {
 	return &RestoreManager{
 		store: store,
 	}

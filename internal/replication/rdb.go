@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/dgraph-io/badger/v4"
-	"github.com/lbp0200/Boltreon/internal/logger"
-	"github.com/lbp0200/Boltreon/internal/store"
+	"github.com/lbp0200/Botreon/internal/logger"
+	"github.com/lbp0200/Botreon/internal/store"
 )
 
 const (
@@ -216,7 +216,7 @@ func (enc *RDBEncoder) writeLength(length uint64) {
 }
 
 // GenerateRDB 生成RDB快照
-func GenerateRDB(s *store.BoltreonStore) ([]byte, error) {
+func GenerateRDB(s *store.BotreonStore) ([]byte, error) {
 	enc := NewRDBEncoder()
 
 	// 选择数据库0

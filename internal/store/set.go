@@ -7,11 +7,11 @@ import (
 	"time"
 
 	"github.com/dgraph-io/badger/v4"
-	"github.com/lbp0200/Boltreon/internal/helper"
+	"github.com/lbp0200/Botreon/internal/helper"
 )
 
 // retryUpdate 重试执行 BadgerDB Update 操作，处理事务冲突
-func (s *BoltreonStore) retryUpdate(fn func(*badger.Txn) error, maxRetries int) error {
+func (s *BotreonStore) retryUpdate(fn func(*badger.Txn) error, maxRetries int) error {
 	var err error
 	for i := 0; i < maxRetries; i++ {
 		err = s.db.Update(fn)
@@ -44,14 +44,14 @@ func (s *BoltreonStore) retryUpdate(fn func(*badger.Txn) error, maxRetries int) 
 }
 
 // setKey 方法用于生成存储在 Badger 数据库中的键
-func (s *BoltreonStore) setKey(key string, parts ...string) string {
+func (s *BotreonStore) setKey(key string, parts ...string) string {
 	base := []string{KeyTypeSet, key}
 	base = append(base, parts...)
 	return strings.Join(base, ":")
 }
 
 // SAdd 实现 Redis SADD 命令
-func (s *BoltreonStore) SAdd(key string, members ...string) (int, error) {
+func (s *BotreonStore) SAdd(key string, members ...string) (int, error) {
 	added := 0
 	err := s.retryUpdate(func(txn *badger.Txn) error {
 		if err := txn.Set(TypeOfKeyGet(key), []byte(KeyTypeSet)); err != nil {
@@ -95,7 +95,7 @@ func (s *BoltreonStore) SAdd(key string, members ...string) (int, error) {
 }
 
 // SRem 实现 Redis SREM 命令
-func (s *BoltreonStore) SRem(key string, members ...string) (int, error) {
+func (s *BotreonStore) SRem(key string, members ...string) (int, error) {
 	removed := 0
 	err := s.retryUpdate(func(txn *badger.Txn) error {
 		countKey := s.setKey(key, "count")
@@ -135,7 +135,7 @@ func (s *BoltreonStore) SRem(key string, members ...string) (int, error) {
 }
 
 // SCard 实现 Redis SCARD 命令
-func (s *BoltreonStore) SCard(key string) (uint64, error) {
+func (s *BotreonStore) SCard(key string) (uint64, error) {
 	var count uint64
 	err := s.db.View(func(txn *badger.Txn) error {
 		countKey := s.setKey(key, "count")
@@ -154,7 +154,7 @@ func (s *BoltreonStore) SCard(key string) (uint64, error) {
 }
 
 // SIsMember 实现 Redis SISMEMBER 命令
-func (s *BoltreonStore) SIsMember(key string, member string) (bool, error) {
+func (s *BotreonStore) SIsMember(key string, member string) (bool, error) {
 	exists := false
 	err := s.db.View(func(txn *badger.Txn) error {
 		memberKey := s.setKey(key, "member", member)
@@ -172,7 +172,7 @@ func (s *BoltreonStore) SIsMember(key string, member string) (bool, error) {
 }
 
 // getAllMembers 获取集合中的所有成员
-func (s *BoltreonStore) getAllMembers(txn *badger.Txn, key string) ([]string, error) {
+func (s *BotreonStore) getAllMembers(txn *badger.Txn, key string) ([]string, error) {
 	var members []string
 	prefix := s.setKey(key, "member")
 	prefixBytes := []byte(prefix + ":")
@@ -193,7 +193,7 @@ func (s *BoltreonStore) getAllMembers(txn *badger.Txn, key string) ([]string, er
 }
 
 // SMembers 实现 Redis SMEMBERS 命令
-func (s *BoltreonStore) SMembers(key string) ([]string, error) {
+func (s *BotreonStore) SMembers(key string) ([]string, error) {
 	var members []string
 	err := s.db.View(func(txn *badger.Txn) error {
 		var err error
@@ -205,7 +205,7 @@ func (s *BoltreonStore) SMembers(key string) ([]string, error) {
 
 // SPop 实现 Redis SPOP 命令，随机弹出并删除一个成员
 // 优化：使用迭代器随机选择，避免加载所有成员
-func (s *BoltreonStore) SPop(key string) (string, error) {
+func (s *BotreonStore) SPop(key string) (string, error) {
 	var member string
 	err := s.retryUpdate(func(txn *badger.Txn) error {
 		// 先获取集合大小
@@ -263,7 +263,7 @@ func (s *BoltreonStore) SPop(key string) (string, error) {
 }
 
 // SPopN 实现 Redis SPOP 命令（带count参数），随机弹出并删除多个成员
-func (s *BoltreonStore) SPopN(key string, count int) ([]string, error) {
+func (s *BotreonStore) SPopN(key string, count int) ([]string, error) {
 	var members []string
 	err := s.retryUpdate(func(txn *badger.Txn) error {
 		allMembers, err := s.getAllMembers(txn, key)
@@ -316,7 +316,7 @@ func (s *BoltreonStore) SPopN(key string, count int) ([]string, error) {
 }
 
 // SRandMember 实现 Redis SRANDMEMBER 命令，随机获取一个成员（不删除）
-func (s *BoltreonStore) SRandMember(key string) (string, error) {
+func (s *BotreonStore) SRandMember(key string) (string, error) {
 	var member string
 	err := s.db.View(func(txn *badger.Txn) error {
 		members, err := s.getAllMembers(txn, key)
@@ -336,7 +336,7 @@ func (s *BoltreonStore) SRandMember(key string) (string, error) {
 }
 
 // SRandMemberN 实现 Redis SRANDMEMBER 命令（带count参数），随机获取多个成员（不删除）
-func (s *BoltreonStore) SRandMemberN(key string, count int) ([]string, error) {
+func (s *BotreonStore) SRandMemberN(key string, count int) ([]string, error) {
 	var members []string
 	err := s.db.View(func(txn *badger.Txn) error {
 		allMembers, err := s.getAllMembers(txn, key)
@@ -371,7 +371,7 @@ func (s *BoltreonStore) SRandMemberN(key string, count int) ([]string, error) {
 }
 
 // SMove 实现 Redis SMOVE 命令，将成员从源集合移动到目标集合
-func (s *BoltreonStore) SMove(source, destination, member string) (bool, error) {
+func (s *BotreonStore) SMove(source, destination, member string) (bool, error) {
 	moved := false
 	err := s.db.Update(func(txn *badger.Txn) error {
 		// 检查成员是否在源集合中
@@ -438,7 +438,7 @@ func (s *BoltreonStore) SMove(source, destination, member string) (bool, error) 
 }
 
 // SInter 实现 Redis SINTER 命令，计算多个集合的交集
-func (s *BoltreonStore) SInter(keys ...string) ([]string, error) {
+func (s *BotreonStore) SInter(keys ...string) ([]string, error) {
 	var result []string
 	err := s.db.View(func(txn *badger.Txn) error {
 		if len(keys) == 0 {
@@ -478,7 +478,7 @@ func (s *BoltreonStore) SInter(keys ...string) ([]string, error) {
 }
 
 // SUnion 实现 Redis SUNION 命令，计算多个集合的并集
-func (s *BoltreonStore) SUnion(keys ...string) ([]string, error) {
+func (s *BotreonStore) SUnion(keys ...string) ([]string, error) {
 	var result []string
 	seen := make(map[string]bool)
 	err := s.db.View(func(txn *badger.Txn) error {
@@ -500,7 +500,7 @@ func (s *BoltreonStore) SUnion(keys ...string) ([]string, error) {
 }
 
 // SDiff 实现 Redis SDIFF 命令，计算第一个集合与其他集合的差集
-func (s *BoltreonStore) SDiff(keys ...string) ([]string, error) {
+func (s *BotreonStore) SDiff(keys ...string) ([]string, error) {
 	var result []string
 	err := s.db.View(func(txn *badger.Txn) error {
 		if len(keys) == 0 {
@@ -537,7 +537,7 @@ func (s *BoltreonStore) SDiff(keys ...string) ([]string, error) {
 }
 
 // SInterStore 实现 Redis SINTERSTORE 命令，计算交集并存储到目标集合
-func (s *BoltreonStore) SInterStore(destination string, keys ...string) (int, error) {
+func (s *BotreonStore) SInterStore(destination string, keys ...string) (int, error) {
 	var count int
 	err := s.db.Update(func(txn *badger.Txn) error {
 		// 在事务中计算交集
@@ -600,7 +600,7 @@ func (s *BoltreonStore) SInterStore(destination string, keys ...string) (int, er
 }
 
 // SUnionStore 实现 Redis SUNIONSTORE 命令，计算并集并存储到目标集合
-func (s *BoltreonStore) SUnionStore(destination string, keys ...string) (int, error) {
+func (s *BotreonStore) SUnionStore(destination string, keys ...string) (int, error) {
 	var count int
 	err := s.db.Update(func(txn *badger.Txn) error {
 		// 在事务中计算并集
@@ -650,7 +650,7 @@ func (s *BoltreonStore) SUnionStore(destination string, keys ...string) (int, er
 }
 
 // SDiffStore 实现 Redis SDIFFSTORE 命令，计算差集并存储到目标集合
-func (s *BoltreonStore) SDiffStore(destination string, keys ...string) (int, error) {
+func (s *BotreonStore) SDiffStore(destination string, keys ...string) (int, error) {
 	var count int
 	err := s.db.Update(func(txn *badger.Txn) error {
 		// 在事务中计算差集

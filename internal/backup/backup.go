@@ -4,12 +4,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/lbp0200/Boltreon/internal/store"
+	"github.com/lbp0200/Botreon/internal/store"
 )
 
 // BackupManager 统一的备份管理器
 type BackupManager struct {
-	store           *store.BoltreonStore
+	store           *store.BotreonStore
 	badgerMgr       *BadgerBackupManager
 	rdbMgr          *RDBBackupManager
 	lastSaveTime    int64
@@ -18,7 +18,7 @@ type BackupManager struct {
 }
 
 // NewBackupManager 创建新的备份管理器
-func NewBackupManager(store *store.BoltreonStore, backupDir string) *BackupManager {
+func NewBackupManager(store *store.BotreonStore, backupDir string) *BackupManager {
 	return &BackupManager{
 		store:     store,
 		badgerMgr: NewBadgerBackupManager(store.GetDB()),

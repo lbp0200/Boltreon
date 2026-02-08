@@ -6,18 +6,18 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/lbp0200/Boltreon/internal/logger"
-	"github.com/lbp0200/Boltreon/internal/replication"
-	"github.com/lbp0200/Boltreon/internal/store"
+	"github.com/lbp0200/Botreon/internal/logger"
+	"github.com/lbp0200/Botreon/internal/replication"
+	"github.com/lbp0200/Botreon/internal/store"
 )
 
 // RDBBackupManager RDB格式备份管理器
 type RDBBackupManager struct {
-	store *store.BoltreonStore
+	store *store.BotreonStore
 }
 
 // NewRDBBackupManager 创建新的RDB备份管理器
-func NewRDBBackupManager(store *store.BoltreonStore) *RDBBackupManager {
+func NewRDBBackupManager(store *store.BotreonStore) *RDBBackupManager {
 	return &RDBBackupManager{
 		store: store,
 	}

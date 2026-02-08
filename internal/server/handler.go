@@ -8,16 +8,16 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/lbp0200/Boltreon/internal/backup"
-	"github.com/lbp0200/Boltreon/internal/cluster"
-	"github.com/lbp0200/Boltreon/internal/logger"
-	"github.com/lbp0200/Boltreon/internal/proto"
-	"github.com/lbp0200/Boltreon/internal/replication"
-	"github.com/lbp0200/Boltreon/internal/store"
+	"github.com/lbp0200/Botreon/internal/backup"
+	"github.com/lbp0200/Botreon/internal/cluster"
+	"github.com/lbp0200/Botreon/internal/logger"
+	"github.com/lbp0200/Botreon/internal/proto"
+	"github.com/lbp0200/Botreon/internal/replication"
+	"github.com/lbp0200/Botreon/internal/store"
 )
 
 type Handler struct {
-	Db          *store.BoltreonStore
+	Db          *store.BotreonStore
 	Cluster     *cluster.Cluster
 	Replication *replication.ReplicationManager
 	Backup      *backup.BackupManager

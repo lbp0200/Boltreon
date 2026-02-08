@@ -9,7 +9,7 @@ import (
 
 func TestCompressionLZ4(t *testing.T) {
 	dbPath := t.TempDir()
-	store, err := NewBoltreonStoreWithCompression(dbPath, CompressionLZ4)
+	store, err := NewBotreonStoreWithCompression(dbPath, CompressionLZ4)
 	assert.NoError(t, err)
 	defer store.Close()
 
@@ -29,7 +29,7 @@ func TestCompressionLZ4(t *testing.T) {
 
 func TestCompressionZSTD(t *testing.T) {
 	dbPath := t.TempDir()
-	store, err := NewBoltreonStoreWithCompression(dbPath, CompressionZSTD)
+	store, err := NewBotreonStoreWithCompression(dbPath, CompressionZSTD)
 	assert.NoError(t, err)
 	defer store.Close()
 
@@ -49,7 +49,7 @@ func TestCompressionZSTD(t *testing.T) {
 
 func TestCompressionNone(t *testing.T) {
 	dbPath := t.TempDir()
-	store, err := NewBoltreonStoreWithCompression(dbPath, CompressionNone)
+	store, err := NewBotreonStoreWithCompression(dbPath, CompressionNone)
 	assert.NoError(t, err)
 	defer store.Close()
 
@@ -69,7 +69,7 @@ func TestCompressionNone(t *testing.T) {
 
 func TestCompressionSmallData(t *testing.T) {
 	dbPath := t.TempDir()
-	store, err := NewBoltreonStoreWithCompression(dbPath, CompressionLZ4)
+	store, err := NewBotreonStoreWithCompression(dbPath, CompressionLZ4)
 	assert.NoError(t, err)
 	defer store.Close()
 
@@ -89,7 +89,7 @@ func TestCompressionSmallData(t *testing.T) {
 
 func TestCompressionHash(t *testing.T) {
 	dbPath := t.TempDir()
-	store, err := NewBoltreonStoreWithCompression(dbPath, CompressionLZ4)
+	store, err := NewBotreonStoreWithCompression(dbPath, CompressionLZ4)
 	assert.NoError(t, err)
 	defer store.Close()
 
@@ -109,14 +109,14 @@ func TestCompressionBackwardCompatibility(t *testing.T) {
 	dbPath := t.TempDir()
 	
 	// 先不使用压缩写入数据
-	store1, err := NewBoltreonStoreWithCompression(dbPath, CompressionNone)
+	store1, err := NewBotreonStoreWithCompression(dbPath, CompressionNone)
 	assert.NoError(t, err)
 	err = store1.Set("key1", "value1")
 	assert.NoError(t, err)
 	store1.Close()
 
 	// 使用压缩读取旧数据
-	store2, err := NewBoltreonStoreWithCompression(dbPath, CompressionLZ4)
+	store2, err := NewBotreonStoreWithCompression(dbPath, CompressionLZ4)
 	assert.NoError(t, err)
 	defer store2.Close()
 
@@ -136,7 +136,7 @@ func TestCompressionBackwardCompatibility(t *testing.T) {
 
 func TestCompressionSwitch(t *testing.T) {
 	dbPath := t.TempDir()
-	store, err := NewBoltreonStoreWithCompression(dbPath, CompressionLZ4)
+	store, err := NewBotreonStoreWithCompression(dbPath, CompressionLZ4)
 	assert.NoError(t, err)
 	defer store.Close()
 

@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/lbp0200/Boltreon/internal/logger"
-	"github.com/lbp0200/Boltreon/internal/proto"
-	"github.com/lbp0200/Boltreon/internal/store"
+	"github.com/lbp0200/Botreon/internal/logger"
+	"github.com/lbp0200/Botreon/internal/proto"
+	"github.com/lbp0200/Botreon/internal/store"
 )
 
 // PSyncResult PSYNC结果
@@ -111,7 +111,7 @@ func SendBacklogData(slave *SlaveConnection, backlog *ReplicationBacklog, startO
 }
 
 // StartSlaveReplication 启动从节点复制（从节点端）
-func StartSlaveReplication(rm *ReplicationManager, store *store.BoltreonStore, masterAddr string) error {
+func StartSlaveReplication(rm *ReplicationManager, store *store.BotreonStore, masterAddr string) error {
 	rm.mu.Lock()
 	rm.role = RoleSlave
 	rm.masterAddr = masterAddr

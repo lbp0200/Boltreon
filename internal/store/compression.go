@@ -142,7 +142,7 @@ func shouldCompress(data []byte, compressionType CompressionType) bool {
 }
 
 // setValueWithCompression 带压缩的数据写入辅助函数
-func (s *BoltreonStore) setValueWithCompression(txn *badger.Txn, key []byte, value []byte) error {
+func (s *BotreonStore) setValueWithCompression(txn *badger.Txn, key []byte, value []byte) error {
 	if shouldCompress(value, s.compressionType) {
 		compressed, err := compressData(value, s.compressionType)
 		if err != nil {
@@ -158,7 +158,7 @@ func (s *BoltreonStore) setValueWithCompression(txn *badger.Txn, key []byte, val
 }
 
 // setEntryWithCompression 带压缩的Entry写入辅助函数
-func (s *BoltreonStore) setEntryWithCompression(txn *badger.Txn, key []byte, value []byte, ttl time.Duration) error {
+func (s *BotreonStore) setEntryWithCompression(txn *badger.Txn, key []byte, value []byte, ttl time.Duration) error {
 	if shouldCompress(value, s.compressionType) {
 		compressed, err := compressData(value, s.compressionType)
 		if err != nil {
@@ -188,7 +188,7 @@ func (s *BoltreonStore) setEntryWithCompression(txn *badger.Txn, key []byte, val
 }
 
 // getValueWithDecompression 带解压缩的数据读取辅助函数
-func (s *BoltreonStore) getValueWithDecompression(item *badger.Item) ([]byte, error) {
+func (s *BotreonStore) getValueWithDecompression(item *badger.Item) ([]byte, error) {
 	value, err := item.ValueCopy(nil)
 	if err != nil {
 		return nil, err

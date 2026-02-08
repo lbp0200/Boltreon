@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/lbp0200/Boltreon/internal/proto"
+	"github.com/lbp0200/Botreon/internal/proto"
 )
 
 // SentinelHandler 哨兵命令处理器

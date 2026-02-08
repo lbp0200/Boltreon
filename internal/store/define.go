@@ -23,7 +23,7 @@ var (
 	//prefixKeySortedSetBytes = []byte("SORTEDSET_")
 )
 
-type BoltreonStore struct {
+type BotreonStore struct {
 	db              *badger.DB
 	compressionType CompressionType
 	// 缓存层
@@ -31,13 +31,13 @@ type BoltreonStore struct {
 	writeCache *LRUCache // 写缓存（用于 SET、HSET 等写操作，减少磁盘写入）
 }
 
-// NewBoltreonStore 创建新的BoltreonStore实例
-func NewBoltreonStore(path string) (*BoltreonStore, error) {
-	return NewBoltreonStoreWithCompression(path, CompressionLZ4)
+// NewBotreonStore 创建新的BotreonStore实例
+func NewBotreonStore(path string) (*BotreonStore, error) {
+	return NewBotreonStoreWithCompression(path, CompressionLZ4)
 }
 
-// NewBoltreonStoreWithCompression 创建新的BoltreonStore实例，指定压缩算法
-func NewBoltreonStoreWithCompression(path string, compressionType CompressionType) (*BoltreonStore, error) {
+// NewBotreonStoreWithCompression 创建新的BotreonStore实例，指定压缩算法
+func NewBotreonStoreWithCompression(path string, compressionType CompressionType) (*BotreonStore, error) {
 	opts := badger.DefaultOptions(path)
 
 	// 性能优化配置
@@ -79,7 +79,7 @@ func NewBoltreonStoreWithCompression(path string, compressionType CompressionTyp
 	// 写缓存：5000 个条目，TTL 1 分钟（用于批量写入优化）
 	writeCache := NewLRUCache(5000, 1*time.Minute)
 
-	return &BoltreonStore{
+	return &BotreonStore{
 		db:              db,
 		compressionType: compressionType,
 		readCache:       readCache,
@@ -87,17 +87,17 @@ func NewBoltreonStoreWithCompression(path string, compressionType CompressionTyp
 	}, nil
 }
 
-func (s *BoltreonStore) Close() error {
+func (s *BotreonStore) Close() error {
 	return s.db.Close()
 }
 
 // GetDB 获取BadgerDB实例（用于复制和备份）
-func (s *BoltreonStore) GetDB() *badger.DB {
+func (s *BotreonStore) GetDB() *badger.DB {
 	return s.db
 }
 
 // FlushDB 删除数据库中的所有键
-func (s *BoltreonStore) FlushDB() error {
+func (s *BotreonStore) FlushDB() error {
 	return s.db.DropAll()
 }
 

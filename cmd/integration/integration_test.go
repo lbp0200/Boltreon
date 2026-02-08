@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lbp0200/Boltreon/internal/server"
-	"github.com/lbp0200/Boltreon/internal/store"
+	"github.com/lbp0200/Botreon/internal/server"
+	"github.com/lbp0200/Botreon/internal/store"
 	"github.com/redis/go-redis/v9"
 	"github.com/zeebo/assert"
 )
@@ -17,7 +17,7 @@ import (
 var (
 	testClient *redis.Client
 	testServer *server.Handler
-	testDB     *store.BoltreonStore
+	testDB     *store.BotreonStore
 	listener   net.Listener
 )
 
@@ -29,7 +29,7 @@ func setupTestServer(t *testing.T) {
 	dbPath := t.TempDir()
 
 	// 创建数据库
-	testDB, err = store.NewBoltreonStore(dbPath)
+	testDB, err = store.NewBotreonStore(dbPath)
 	assert.NoError(t, err)
 
 	// 创建服务器处理器

@@ -7,7 +7,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/lbp0200/Boltreon/internal/logger"
+	"github.com/lbp0200/Botreon/internal/logger"
 )
 
 // store/badger_store.go

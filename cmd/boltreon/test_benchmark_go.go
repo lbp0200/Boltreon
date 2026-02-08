@@ -9,7 +9,7 @@ import (
 	"net"
 	"time"
 
-	"github.com/lbp0200/Boltreon/internal/proto"
+	"github.com/lbp0200/Botreon/internal/proto"
 )
 
 // 模拟 redis-benchmark 的行为

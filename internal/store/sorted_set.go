@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/dgraph-io/badger/v4"
-	"github.com/lbp0200/Boltreon/internal/logger"
+	"github.com/lbp0200/Botreon/internal/logger"
 )
 
 const (
@@ -102,7 +102,7 @@ func keyBadgerGet(prefix string, key []byte) []byte {
 }
 
 // retryUpdate 重试执行 BadgerDB Update 操作，处理事务冲突
-func (s *BoltreonStore) retryUpdateSortedSet(fn func(*badger.Txn) error, maxRetries int) error {
+func (s *BotreonStore) retryUpdateSortedSet(fn func(*badger.Txn) error, maxRetries int) error {
 	var err error
 	for i := 0; i < maxRetries; i++ {
 		err = s.db.Update(fn)
@@ -134,7 +134,7 @@ func (s *BoltreonStore) retryUpdateSortedSet(fn func(*badger.Txn) error, maxRetr
 }
 
 // ZAdd 添加或更新成员分数
-func (s *BoltreonStore) ZAdd(zSetName string, members []ZSetMember) error {
+func (s *BotreonStore) ZAdd(zSetName string, members []ZSetMember) error {
 	if len(members) == 0 {
 		return nil
 	}
@@ -248,7 +248,7 @@ func (s *BoltreonStore) ZAdd(zSetName string, members []ZSetMember) error {
 }
 
 // ZRangeByScore 获取分数范围内的成员
-func (s *BoltreonStore) ZRangeByScore(zSetName string, minScore, maxScore float64, offset, count int) ([]ZSetMember, error) {
+func (s *BotreonStore) ZRangeByScore(zSetName string, minScore, maxScore float64, offset, count int) ([]ZSetMember, error) {
 	var results []ZSetMember
 	err := s.db.View(func(txn *badger.Txn) error {
 		opts := badger.DefaultIteratorOptions
@@ -302,7 +302,7 @@ func (s *BoltreonStore) ZRangeByScore(zSetName string, minScore, maxScore float6
 }
 
 // ZRem 删除成员
-func (s *BoltreonStore) ZRem(zSetName, member string) error {
+func (s *BotreonStore) ZRem(zSetName, member string) error {
 	return s.retryUpdateSortedSet(func(txn *badger.Txn) error {
 		dataKey := sortedSetKeyMember(zSetName, member)
 		item, err := txn.Get(dataKey)
@@ -381,7 +381,7 @@ func (s *BoltreonStore) ZRem(zSetName, member string) error {
 }
 
 // ZScore 获取成员分数
-func (s *BoltreonStore) ZScore(zSetName, member string) (float64, bool, error) {
+func (s *BotreonStore) ZScore(zSetName, member string) (float64, bool, error) {
 	var score float64
 	dataKey := sortedSetKeyMember(zSetName, member)
 
@@ -406,7 +406,7 @@ func (s *BoltreonStore) ZScore(zSetName, member string) (float64, bool, error) {
 }
 
 // ZRange 获取指定排名范围的成员
-func (s *BoltreonStore) ZRange(zSetName string, start, stop int64) ([]*ZSetMember, error) {
+func (s *BotreonStore) ZRange(zSetName string, start, stop int64) ([]*ZSetMember, error) {
 	var results []*ZSetMember
 	err := s.db.View(func(txn *badger.Txn) error {
 		opts := badger.DefaultIteratorOptions
@@ -505,7 +505,7 @@ func (s *BoltreonStore) ZRange(zSetName string, start, stop int64) ([]*ZSetMembe
 }
 
 // ZSetDel 删除整个排序集
-func (s *BoltreonStore) ZSetDel(zSetName string) error {
+func (s *BotreonStore) ZSetDel(zSetName string) error {
 	return s.retryUpdateSortedSet(func(txn *badger.Txn) error {
 		dataPrefix := []byte(zSetName + sortedSetData)
 		indexPrefix := []byte(zSetName + sortedSetIndex)
@@ -549,7 +549,7 @@ func (s *BoltreonStore) ZSetDel(zSetName string) error {
 }
 
 // ZCard 实现 Redis ZCARD 命令，获取有序集合中成员的数量
-func (s *BoltreonStore) ZCard(zSetName string) (int64, error) {
+func (s *BotreonStore) ZCard(zSetName string) (int64, error) {
 	var card int64
 	err := s.db.View(func(txn *badger.Txn) error {
 		metaKey := sortedSetKeyMeta(zSetName)
@@ -574,7 +574,7 @@ func (s *BoltreonStore) ZCard(zSetName string) (int64, error) {
 }
 
 // ZCount 实现 Redis ZCOUNT 命令，计算在有序集合中指定区间分数的成员数
-func (s *BoltreonStore) ZCount(zSetName string, minScore, maxScore float64) (int64, error) {
+func (s *BotreonStore) ZCount(zSetName string, minScore, maxScore float64) (int64, error) {
 	var count int64
 	err := s.db.View(func(txn *badger.Txn) error {
 		opts := badger.DefaultIteratorOptions
@@ -611,7 +611,7 @@ func (s *BoltreonStore) ZCount(zSetName string, minScore, maxScore float64) (int
 }
 
 // ZIncrBy 实现 Redis ZINCRBY 命令，增加成员的分数
-func (s *BoltreonStore) ZIncrBy(zSetName, member string, increment float64) (float64, error) {
+func (s *BotreonStore) ZIncrBy(zSetName, member string, increment float64) (float64, error) {
 	var newScore float64
 	err := s.retryUpdateSortedSet(func(txn *badger.Txn) error {
 		badgerTypeKey := TypeOfKeyGet(zSetName)
@@ -688,7 +688,7 @@ func (s *BoltreonStore) ZIncrBy(zSetName, member string, increment float64) (flo
 }
 
 // ZRank 实现 Redis ZRANK 命令，返回成员的排名（从0开始，分数从小到大）
-func (s *BoltreonStore) ZRank(zSetName, member string) (int64, error) {
+func (s *BotreonStore) ZRank(zSetName, member string) (int64, error) {
 	var rank int64 = -1
 	err := s.db.View(func(txn *badger.Txn) error {
 		// 获取成员分数
@@ -749,7 +749,7 @@ func (s *BoltreonStore) ZRank(zSetName, member string) (int64, error) {
 }
 
 // ZRevRank 实现 Redis ZREVRANK 命令，返回成员的排名（从0开始，分数从大到小）
-func (s *BoltreonStore) ZRevRank(zSetName, member string) (int64, error) {
+func (s *BotreonStore) ZRevRank(zSetName, member string) (int64, error) {
 	var rank int64 = -1
 	err := s.db.View(func(txn *badger.Txn) error {
 		// 检查成员是否存在
@@ -796,7 +796,7 @@ func (s *BoltreonStore) ZRevRank(zSetName, member string) (int64, error) {
 }
 
 // ZRevRange 实现 Redis ZREVRANGE 命令，返回有序集中指定区间内的成员，通过索引，分数从高到低
-func (s *BoltreonStore) ZRevRange(zSetName string, start, stop int64) ([]*ZSetMember, error) {
+func (s *BotreonStore) ZRevRange(zSetName string, start, stop int64) ([]*ZSetMember, error) {
 	// 先获取正向范围
 	forwardResults, err := s.ZRange(zSetName, 0, -1)
 	if err != nil {
@@ -836,7 +836,7 @@ func (s *BoltreonStore) ZRevRange(zSetName string, start, stop int64) ([]*ZSetMe
 }
 
 // ZRevRangeByScore 实现 Redis ZREVRANGEBYSCORE 命令，返回有序集中指定分数区间内的成员，分数从高到低排序
-func (s *BoltreonStore) ZRevRangeByScore(zSetName string, maxScore, minScore float64, offset, count int) ([]ZSetMember, error) {
+func (s *BotreonStore) ZRevRangeByScore(zSetName string, maxScore, minScore float64, offset, count int) ([]ZSetMember, error) {
 	// 先获取正向范围
 	forwardResults, err := s.ZRangeByScore(zSetName, minScore, maxScore, 0, 0)
 	if err != nil {
@@ -864,7 +864,7 @@ func (s *BoltreonStore) ZRevRangeByScore(zSetName string, maxScore, minScore flo
 }
 
 // ZRemRangeByRank 实现 Redis ZREMRANGEBYRANK 命令，移除有序集中指定排名区间的所有成员
-func (s *BoltreonStore) ZRemRangeByRank(zSetName string, start, stop int64) (int64, error) {
+func (s *BotreonStore) ZRemRangeByRank(zSetName string, start, stop int64) (int64, error) {
 	// 先获取范围内的成员
 	members, err := s.ZRange(zSetName, start, stop)
 	if err != nil {
@@ -883,7 +883,7 @@ func (s *BoltreonStore) ZRemRangeByRank(zSetName string, start, stop int64) (int
 }
 
 // ZRemRangeByScore 实现 Redis ZREMRANGEBYSCORE 命令，移除有序集中指定分数区间的所有成员
-func (s *BoltreonStore) ZRemRangeByScore(zSetName string, minScore, maxScore float64) (int64, error) {
+func (s *BotreonStore) ZRemRangeByScore(zSetName string, minScore, maxScore float64) (int64, error) {
 	// 先获取范围内的成员
 	members, err := s.ZRangeByScore(zSetName, minScore, maxScore, 0, 0)
 	if err != nil {
@@ -902,7 +902,7 @@ func (s *BoltreonStore) ZRemRangeByScore(zSetName string, minScore, maxScore flo
 }
 
 // ZPopMax 实现 Redis ZPOPMAX 命令，移除并返回有序集合中分数最高的成员
-func (s *BoltreonStore) ZPopMax(zSetName string, count int) ([]ZSetMember, error) {
+func (s *BotreonStore) ZPopMax(zSetName string, count int) ([]ZSetMember, error) {
 	// 先获取最后count个成员（分数最高的）
 	members, err := s.ZRevRange(zSetName, 0, int64(count-1))
 	if err != nil {
@@ -921,7 +921,7 @@ func (s *BoltreonStore) ZPopMax(zSetName string, count int) ([]ZSetMember, error
 }
 
 // ZPopMin 实现 Redis ZPOPMIN 命令，移除并返回有序集合中分数最低的成员
-func (s *BoltreonStore) ZPopMin(zSetName string, count int) ([]ZSetMember, error) {
+func (s *BotreonStore) ZPopMin(zSetName string, count int) ([]ZSetMember, error) {
 	// 先获取前count个成员（分数最低的）
 	members, err := s.ZRange(zSetName, 0, int64(count-1))
 	if err != nil {
@@ -940,7 +940,7 @@ func (s *BoltreonStore) ZPopMin(zSetName string, count int) ([]ZSetMember, error
 }
 
 // ZUnionStore 实现 Redis ZUNIONSTORE 命令，计算并集并存储到目标集合
-func (s *BoltreonStore) ZUnionStore(destination string, keys []string, weights []float64, aggregate string) (int64, error) {
+func (s *BotreonStore) ZUnionStore(destination string, keys []string, weights []float64, aggregate string) (int64, error) {
 	// 先收集所有成员的分数（考虑权重和聚合方式）
 	memberScores := make(map[string]float64)
 
@@ -999,7 +999,7 @@ func (s *BoltreonStore) ZUnionStore(destination string, keys []string, weights [
 }
 
 // ZInterStore 实现 Redis ZINTERSTORE 命令，计算交集并存储到目标集合
-func (s *BoltreonStore) ZInterStore(destination string, keys []string, weights []float64, aggregate string) (int64, error) {
+func (s *BotreonStore) ZInterStore(destination string, keys []string, weights []float64, aggregate string) (int64, error) {
 	if len(keys) == 0 {
 		// 删除目标集合
 		_ = s.ZSetDel(destination)
@@ -1083,7 +1083,7 @@ func (s *BoltreonStore) ZInterStore(destination string, keys []string, weights [
 }
 
 // ZDiffStore 实现 Redis ZDIFFSTORE 命令，计算差集并存储到目标集合
-func (s *BoltreonStore) ZDiffStore(destination string, keys []string) (int64, error) {
+func (s *BotreonStore) ZDiffStore(destination string, keys []string) (int64, error) {
 	if len(keys) == 0 {
 		// 删除目标集合
 		_ = s.ZSetDel(destination)
@@ -1130,7 +1130,7 @@ func (s *BoltreonStore) ZDiffStore(destination string, keys []string) (int64, er
 }
 
 // ZLexCount 实现 Redis ZLEXCOUNT 命令，计算有序集合中成员值介于min和max之间的成员数量（字典序）
-func (s *BoltreonStore) ZLexCount(zSetName, min, max string) (int64, error) {
+func (s *BotreonStore) ZLexCount(zSetName, min, max string) (int64, error) {
 	// 获取所有成员（按分数排序）
 	members, err := s.ZRange(zSetName, 0, -1)
 	if err != nil {
@@ -1218,7 +1218,7 @@ func compareLex(a, b string, inclusive bool) bool {
 }
 
 // ZRangeByLex 实现 Redis ZRANGEBYLEX 命令，返回有序集合中成员值介于min和max之间的成员（字典序）
-func (s *BoltreonStore) ZRangeByLex(zSetName, min, max string, offset, count int) ([]string, error) {
+func (s *BotreonStore) ZRangeByLex(zSetName, min, max string, offset, count int) ([]string, error) {
 	// 获取所有成员（按分数排序，相同分数按字典序）
 	members, err := s.ZRange(zSetName, 0, -1)
 	if err != nil {
@@ -1265,7 +1265,7 @@ func (s *BoltreonStore) ZRangeByLex(zSetName, min, max string, offset, count int
 }
 
 // ZRevRangeByLex 实现 Redis ZREVRANGEBYLEX 命令，返回有序集合中成员值介于min和max之间的成员（字典序，反向）
-func (s *BoltreonStore) ZRevRangeByLex(zSetName, max, min string, offset, count int) ([]string, error) {
+func (s *BotreonStore) ZRevRangeByLex(zSetName, max, min string, offset, count int) ([]string, error) {
 	// 先获取正向范围
 	results, err := s.ZRangeByLex(zSetName, min, max, 0, 0)
 	if err != nil {
@@ -1295,7 +1295,7 @@ func (s *BoltreonStore) ZRevRangeByLex(zSetName, max, min string, offset, count 
 }
 
 // ZRemRangeByLex 实现 Redis ZREMRANGEBYLEX 命令，移除有序集合中成员值介于min和max之间的成员（字典序）
-func (s *BoltreonStore) ZRemRangeByLex(zSetName, min, max string) (int64, error) {
+func (s *BotreonStore) ZRemRangeByLex(zSetName, min, max string) (int64, error) {
 	var removed int64
 	err := s.retryUpdateSortedSet(func(txn *badger.Txn) error {
 		// 获取范围内的成员
@@ -1317,7 +1317,7 @@ func (s *BoltreonStore) ZRemRangeByLex(zSetName, min, max string) (int64, error)
 }
 
 // ZMScore 实现 Redis ZMSCORE 命令，批量获取多个成员的分数
-func (s *BoltreonStore) ZMScore(zSetName string, members ...string) ([]float64, error) {
+func (s *BotreonStore) ZMScore(zSetName string, members ...string) ([]float64, error) {
 	scores := make([]float64, len(members))
 	for i, member := range members {
 		score, exists, err := s.ZScore(zSetName, member)

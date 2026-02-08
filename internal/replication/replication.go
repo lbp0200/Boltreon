@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/lbp0200/Boltreon/internal/logger"
-	"github.com/lbp0200/Boltreon/internal/store"
+	"github.com/lbp0200/Botreon/internal/logger"
+	"github.com/lbp0200/Botreon/internal/store"
 )
 
 const (
@@ -25,12 +25,12 @@ type ReplicationManager struct {
 	backlog         *ReplicationBacklog       // 复制积压缓冲区
 	masterReplOffset int64                    // 主节点复制偏移量
 	replId          string                    // 复制ID(主节点运行ID)
-	store           *store.BoltreonStore       // 数据存储
+	store           *store.BotreonStore       // 数据存储
 	stopCh          chan struct{}             // 停止信号
 }
 
 // NewReplicationManager 创建新的复制管理器
-func NewReplicationManager(store *store.BoltreonStore) *ReplicationManager {
+func NewReplicationManager(store *store.BotreonStore) *ReplicationManager {
 	replId, _ := generateReplicationID()
 	rm := &ReplicationManager{
 		role:            RoleMaster,

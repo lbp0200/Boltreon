@@ -8,7 +8,7 @@ import (
 	"github.com/dgraph-io/badger/v4"
 )
 
-func (s *BoltreonStore) Del(key string) error {
+func (s *BotreonStore) Del(key string) error {
 	typeKey := TypeOfKeyGet(key)
 	return s.db.Update(func(txn *badger.Txn) error {
 		item, err := txn.Get(typeKey)
@@ -62,8 +62,8 @@ func (s *BoltreonStore) Del(key string) error {
 	})
 }
 
-func (s *BoltreonStore) DelString(key string) error {
-	logFuncTag := "BoltreonStoreDelString"
+func (s *BotreonStore) DelString(key string) error {
+	logFuncTag := "BotreonStoreDelString"
 	bKey := []byte(key)
 	badgerTypeKey := TypeOfKeyGet(key)
 	badgerValueKey := s.stringKey(string(bKey))
@@ -101,7 +101,7 @@ func deleteByPrefix(txn *badger.Txn, prefix []byte) error {
 }
 
 // getKeyValueKey 根据键类型获取值键
-func (s *BoltreonStore) getKeyValueKey(key string, keyType string) ([]byte, error) {
+func (s *BotreonStore) getKeyValueKey(key string, keyType string) ([]byte, error) {
 	switch keyType {
 	case KeyTypeString:
 		return []byte(s.stringKey(key)), nil
@@ -123,7 +123,7 @@ func (s *BoltreonStore) getKeyValueKey(key string, keyType string) ([]byte, erro
 }
 
 // EXISTS 实现 Redis EXISTS 命令，检查键是否存在
-func (s *BoltreonStore) Exists(key string) (bool, error) {
+func (s *BotreonStore) Exists(key string) (bool, error) {
 	exists := false
 	err := s.db.View(func(txn *badger.Txn) error {
 		typeKey := TypeOfKeyGet(key)
@@ -141,7 +141,7 @@ func (s *BoltreonStore) Exists(key string) (bool, error) {
 }
 
 // Type 实现 Redis TYPE 命令，返回键的类型
-func (s *BoltreonStore) Type(key string) (string, error) {
+func (s *BotreonStore) Type(key string) (string, error) {
 	var keyType string
 	err := s.db.View(func(txn *badger.Txn) error {
 		typeKey := TypeOfKeyGet(key)
@@ -179,7 +179,7 @@ func (s *BoltreonStore) Type(key string) (string, error) {
 }
 
 // EXPIRE 实现 Redis EXPIRE 命令，设置键的过期时间（秒）
-func (s *BoltreonStore) Expire(key string, seconds int) (bool, error) {
+func (s *BotreonStore) Expire(key string, seconds int) (bool, error) {
 	success := false
 	err := s.db.Update(func(txn *badger.Txn) error {
 		typeKey := TypeOfKeyGet(key)
@@ -229,7 +229,7 @@ func (s *BoltreonStore) Expire(key string, seconds int) (bool, error) {
 }
 
 // EXPIREAT 实现 Redis EXPIREAT 命令，设置键的过期时间（Unix时间戳，秒）
-func (s *BoltreonStore) ExpireAt(key string, timestamp int64) (bool, error) {
+func (s *BotreonStore) ExpireAt(key string, timestamp int64) (bool, error) {
 	now := time.Now().Unix()
 	ttl := timestamp - now
 	if ttl <= 0 {
@@ -240,7 +240,7 @@ func (s *BoltreonStore) ExpireAt(key string, timestamp int64) (bool, error) {
 }
 
 // PEXPIRE 实现 Redis PEXPIRE 命令，设置键的过期时间（毫秒）
-func (s *BoltreonStore) PExpire(key string, milliseconds int64) (bool, error) {
+func (s *BotreonStore) PExpire(key string, milliseconds int64) (bool, error) {
 	success := false
 	err := s.db.Update(func(txn *badger.Txn) error {
 		typeKey := TypeOfKeyGet(key)
@@ -290,7 +290,7 @@ func (s *BoltreonStore) PExpire(key string, milliseconds int64) (bool, error) {
 }
 
 // PEXPIREAT 实现 Redis PEXPIREAT 命令，设置键的过期时间（Unix时间戳，毫秒）
-func (s *BoltreonStore) PExpireAt(key string, timestampMillis int64) (bool, error) {
+func (s *BotreonStore) PExpireAt(key string, timestampMillis int64) (bool, error) {
 	now := time.Now().UnixNano() / int64(time.Millisecond)
 	ttl := timestampMillis - now
 	if ttl <= 0 {
@@ -301,7 +301,7 @@ func (s *BoltreonStore) PExpireAt(key string, timestampMillis int64) (bool, erro
 }
 
 // TTL 实现 Redis TTL 命令，获取键的剩余生存时间（秒）
-func (s *BoltreonStore) TTL(key string) (int64, error) {
+func (s *BotreonStore) TTL(key string) (int64, error) {
 	var ttl int64 = -2 // -2表示键不存在
 	err := s.db.View(func(txn *badger.Txn) error {
 		typeKey := TypeOfKeyGet(key)
@@ -351,7 +351,7 @@ func (s *BoltreonStore) TTL(key string) (int64, error) {
 }
 
 // PTTL 实现 Redis PTTL 命令，获取键的剩余生存时间（毫秒）
-func (s *BoltreonStore) PTTL(key string) (int64, error) {
+func (s *BotreonStore) PTTL(key string) (int64, error) {
 	var ttl int64 = -2 // -2表示键不存在
 	err := s.db.View(func(txn *badger.Txn) error {
 		typeKey := TypeOfKeyGet(key)
@@ -401,7 +401,7 @@ func (s *BoltreonStore) PTTL(key string) (int64, error) {
 }
 
 // PERSIST 实现 Redis PERSIST 命令，移除键的过期时间
-func (s *BoltreonStore) Persist(key string) (bool, error) {
+func (s *BotreonStore) Persist(key string) (bool, error) {
 	// 先读取键的类型和值键（在 View 事务中）
 	var valueKey []byte
 	var hasTTL bool
@@ -466,7 +466,7 @@ func (s *BoltreonStore) Persist(key string) (bool, error) {
 }
 
 // RENAME 实现 Redis RENAME 命令，重命名键
-func (s *BoltreonStore) Rename(key, newKey string) error {
+func (s *BotreonStore) Rename(key, newKey string) error {
 	// 清除读缓存
 	if s.readCache != nil {
 		s.readCache.Delete(key)
@@ -687,7 +687,7 @@ func copyKeysByPrefix(txn *badger.Txn, oldPrefix []byte, oldKey, newKey, keyType
 }
 
 // RENAMENX 实现 Redis RENAMENX 命令，仅当新键不存在时重命名
-func (s *BoltreonStore) RenameNX(key, newKey string) (bool, error) {
+func (s *BotreonStore) RenameNX(key, newKey string) (bool, error) {
 	success := false
 	err := s.db.Update(func(txn *badger.Txn) error {
 		// 检查新键是否已存在
@@ -757,7 +757,7 @@ func matchPattern(key, pattern string) bool {
 }
 
 // Keys 实现 Redis KEYS 命令，查找所有匹配给定模式的键
-func (s *BoltreonStore) Keys(pattern string) ([]string, error) {
+func (s *BotreonStore) Keys(pattern string) ([]string, error) {
 	var keys []string
 	err := s.db.View(func(txn *badger.Txn) error {
 		opts := badger.DefaultIteratorOptions
@@ -788,7 +788,7 @@ type ScanResult struct {
 }
 
 // Scan 实现 Redis SCAN 命令，增量迭代键空间
-func (s *BoltreonStore) Scan(cursor uint64, pattern string, count int) (ScanResult, error) {
+func (s *BotreonStore) Scan(cursor uint64, pattern string, count int) (ScanResult, error) {
 	var result ScanResult
 	result.Cursor = 0
 	result.Keys = []string{}
@@ -845,7 +845,7 @@ func (s *BoltreonStore) Scan(cursor uint64, pattern string, count int) (ScanResu
 }
 
 // RandomKey 实现 Redis RANDOMKEY 命令，随机返回一个键
-func (s *BoltreonStore) RandomKey() (string, error) {
+func (s *BotreonStore) RandomKey() (string, error) {
 	var key string
 	err := s.db.View(func(txn *badger.Txn) error {
 		opts := badger.DefaultIteratorOptions
