@@ -10,8 +10,3 @@ issues:
         - errcheck
         - unused
         - ineffassign
-
-    # Non-test files - ignore these specific linters in certain contexts
-    - path: internal/replication/rdb\.go
-      linters:
-        - errcheck
