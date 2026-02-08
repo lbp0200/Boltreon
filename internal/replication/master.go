@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/lbp0200/Botreon/internal/logger"
-	"github.com/lbp0200/Botreon/internal/proto"
+	"github.com/lbp0200/BoltDB/internal/logger"
+	"github.com/lbp0200/BoltDB/internal/proto"
 )
 
 // MasterConnection 表示到主节点的连接

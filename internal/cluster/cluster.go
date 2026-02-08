@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/lbp0200/Botreon/internal/store"
+	"github.com/lbp0200/BoltDB/internal/store"
 )
 
 // Cluster 表示Redis集群

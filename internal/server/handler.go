@@ -8,12 +8,12 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/lbp0200/Botreon/internal/backup"
-	"github.com/lbp0200/Botreon/internal/cluster"
-	"github.com/lbp0200/Botreon/internal/logger"
-	"github.com/lbp0200/Botreon/internal/proto"
-	"github.com/lbp0200/Botreon/internal/replication"
-	"github.com/lbp0200/Botreon/internal/store"
+	"github.com/lbp0200/BoltDB/internal/backup"
+	"github.com/lbp0200/BoltDB/internal/cluster"
+	"github.com/lbp0200/BoltDB/internal/logger"
+	"github.com/lbp0200/BoltDB/internal/proto"
+	"github.com/lbp0200/BoltDB/internal/replication"
+	"github.com/lbp0200/BoltDB/internal/store"
 )
 
 type Handler struct {

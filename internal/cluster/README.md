@@ -1,6 +1,6 @@
 # Redis Cluster 模式支持
 
-Boltreon 实现了 Redis Cluster 模式的核心功能，支持槽位分片、节点管理和集群命令。
+BoltDB 实现了 Redis Cluster 模式的核心功能，支持槽位分片、节点管理和集群命令。
 
 ## 功能特性
 
@@ -80,14 +80,14 @@ CLUSTER EPOCH
 
 ```go
 import (
-    "github.com/lbp0200/Boltreon/internal/cluster"
-    "github.com/lbp0200/Boltreon/internal/server"
-    "github.com/lbp0200/Boltreon/internal/store"
+    "github.com/lbp0200/BoltDB/internal/cluster"
+    "github.com/lbp0200/BoltDB/internal/server"
+    "github.com/lbp0200/BoltDB/internal/store"
 )
 
 func main() {
     // 创建存储
-    db, err := store.NewBoltreonStore("./data")
+    db, err := store.NewBoltDBStore("./data")
     if err != nil {
         log.Fatal(err)
     }

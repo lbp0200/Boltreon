@@ -2,7 +2,7 @@
 
 ## 概述
 
-Boltreon现在支持在数据写入和读取时进行压缩/解压缩，支持LZ4和ZSTD两种压缩算法，默认使用LZ4。
+BoltDB现在支持在数据写入和读取时进行压缩/解压缩，支持LZ4和ZSTD两种压缩算法，默认使用LZ4。
 
 ## 依赖安装
 
@@ -24,7 +24,7 @@ go mod tidy
 ### 1. 使用默认LZ4压缩（推荐）
 
 ```go
-store, err := store.NewBoltreonStore("/path/to/db")
+store, err := store.NewBoltDBStore("/path/to/db")
 // 或者
 store, err := store.NewBadgerStore("/path/to/db")
 ```
@@ -33,13 +33,13 @@ store, err := store.NewBadgerStore("/path/to/db")
 
 ```go
 // 使用LZ4压缩
-store, err := store.NewBoltreonStoreWithCompression("/path/to/db", store.CompressionLZ4)
+store, err := store.NewBoltDBStoreWithCompression("/path/to/db", store.CompressionLZ4)
 
 // 使用ZSTD压缩
-store, err := store.NewBoltreonStoreWithCompression("/path/to/db", store.CompressionZSTD)
+store, err := store.NewBoltDBStoreWithCompression("/path/to/db", store.CompressionZSTD)
 
 // 不使用压缩
-store, err := store.NewBoltreonStoreWithCompression("/path/to/db", store.CompressionNone)
+store, err := store.NewBoltDBStoreWithCompression("/path/to/db", store.CompressionNone)
 ```
 
 ### 3. 运行时修改压缩算法
@@ -98,12 +98,12 @@ package main
 
 import (
     "fmt"
-    "github.com/lbp0200/Boltreon/internal/store"
+    "github.com/lbp0200/BoltDB/internal/store"
 )
 
 func main() {
     // 使用LZ4压缩（默认）
-    db, err := store.NewBoltreonStore("/tmp/boltreon")
+    db, err := store.NewBoltDBStore("/tmp/boltreon")
     if err != nil {
         panic(err)
     }

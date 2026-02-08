@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/lbp0200/Botreon/internal/logger"
-	"github.com/lbp0200/Botreon/internal/proto"
-	"github.com/lbp0200/Botreon/internal/store"
+	"github.com/lbp0200/BoltDB/internal/logger"
+	"github.com/lbp0200/BoltDB/internal/proto"
+	"github.com/lbp0200/BoltDB/internal/store"
 )
 
 // PSyncResult PSYNC结果

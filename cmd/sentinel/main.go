@@ -5,8 +5,8 @@ import (
 	"net"
 	"time"
 
-	"github.com/lbp0200/Botreon/internal/logger"
-	"github.com/lbp0200/Botreon/internal/sentinel"
+	"github.com/lbp0200/BoltDB/internal/logger"
+	"github.com/lbp0200/BoltDB/internal/sentinel"
 )
 
 func main() {

@@ -6,7 +6,7 @@ import (
 	"net"
 	"os"
 
-	"github.com/lbp0200/Botreon/internal/proto"
+	"github.com/lbp0200/BoltDB/internal/proto"
 )
 
 // 简单的调试客户端，用于测试服务器响应

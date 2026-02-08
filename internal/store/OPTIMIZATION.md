@@ -1,6 +1,6 @@
-# Boltreon 性能优化文档
+# BoltDB 性能优化文档
 
-本文档描述了 Boltreon 的性能优化措施，包括 BadgerDB 配置优化、缓存层实现和数据结构优化。
+本文档描述了 BoltDB 的性能优化措施，包括 BadgerDB 配置优化、缓存层实现和数据结构优化。
 
 ## 1. BadgerDB 配置优化
 

@@ -1,4 +1,4 @@
-module github.com/lbp0200/Botreon
+module github.com/lbp0200/BoltDB
 
 go 1.25
 

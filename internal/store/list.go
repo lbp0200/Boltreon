@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/lbp0200/Botreon/internal/helper"
+	"github.com/lbp0200/BoltDB/internal/helper"
 
 	"github.com/dgraph-io/badger/v4"
 	"github.com/google/uuid"

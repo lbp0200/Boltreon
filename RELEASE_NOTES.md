@@ -21,10 +21,10 @@ Pre-built binaries:
 ## Installation
 ```bash
 # macOS (Homebrew)
-brew install lbp0200/Botreon/boltreon
+brew install lbp0200/BoltDB/boltreon
 
 # Linux/Darwin (curl)
-curl -L https://github.com/lbp0200/Botreon/releases/download/v0.2.0/boltreon-v0.2.0-linux-amd64 -o boltreon
+curl -L https://github.com/lbp0200/BoltDB/releases/download/v0.2.0/boltreon-v0.2.0-linux-amd64 -o boltreon
 chmod +x boltreon
 
 # Windows

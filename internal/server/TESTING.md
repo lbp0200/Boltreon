@@ -1,6 +1,6 @@
 # Redis服务器测试指南
 
-本文档介绍如何测试Boltreon Redis服务器的实现。
+本文档介绍如何测试BoltDB Redis服务器的实现。
 
 ## 测试类型
 

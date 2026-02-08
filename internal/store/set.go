@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/dgraph-io/badger/v4"
-	"github.com/lbp0200/Botreon/internal/helper"
+	"github.com/lbp0200/BoltDB/internal/helper"
 )
 
 // retryUpdate 重试执行 BadgerDB Update 操作，处理事务冲突

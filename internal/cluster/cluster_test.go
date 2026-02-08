@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lbp0200/Botreon/internal/store"
+	"github.com/lbp0200/BoltDB/internal/store"
 	"github.com/zeebo/assert"
 )
 

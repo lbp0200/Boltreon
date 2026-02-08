@@ -4,7 +4,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/lbp0200/Botreon/internal/logger"
+	"github.com/lbp0200/BoltDB/internal/logger"
 )
 
 // MasterInstance 主节点实例

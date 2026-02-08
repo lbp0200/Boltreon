@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/lbp0200/Botreon/internal/logger"
+	"github.com/lbp0200/BoltDB/internal/logger"
 )
 
 // FailoverManager 故障转移管理器

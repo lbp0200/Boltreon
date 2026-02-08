@@ -4,16 +4,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Boltreon is a disk-persistent Redis-compatible database written in Go, using BadgerDB for storage. It overcomes Redis's memory limitations by supporting up to 100TB of data on disk while maintaining Redis protocol compatibility.
+BoltDB is a disk-persistent Redis-compatible database written in Go, using BadgerDB for storage. It overcomes Redis's memory limitations by supporting up to 100TB of data on disk while maintaining Redis protocol compatibility.
 
 ## Common Commands
 
 ```bash
 # Build and run development server
-go run cmd/boltreon/main.go -dir=./data
+go run cmd/boltDB/main.go -dir=./data
 
 # Build binary
-go build -o boltreon cmd/boltreon/main.go
+go build -o boltDB cmd/boltDB/main.go
 
 # Run tests
 go test ./...
@@ -25,8 +25,8 @@ go mod tidy
 ## Architecture
 
 ```
-cmd/boltreon/main.go    → Entry point with CLI args (-addr, -dir, -log-level)
-cmd/sentinel/           → Sentinel instance for HA
+cmd/boltDB/main.go    → Entry point with CLI args (-addr, -dir, -log-level)
+cmd/sentinel/         → Sentinel instance for HA
 internal/
   ├── server/          → Redis protocol command handler (SET, GET, HSET, etc.)
   ├── store/           → BadgerDB storage layer (String, List, Hash, Set, SortedSet)
@@ -47,7 +47,7 @@ internal/
 
 ## Logging
 
-Uses zerolog with configurable levels via `-log-level` flag or `BOLTREON_LOG_LEVEL` env variable (default: WARNING).
+Uses zerolog with configurable levels via `-log-level` flag or `BOLTDB_LOG_LEVEL` env variable (default: WARNING).
 
 ## Dependencies
 

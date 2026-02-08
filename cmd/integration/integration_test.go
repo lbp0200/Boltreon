@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lbp0200/Botreon/internal/server"
-	"github.com/lbp0200/Botreon/internal/store"
+	"github.com/lbp0200/BoltDB/internal/server"
+	"github.com/lbp0200/BoltDB/internal/store"
 	"github.com/redis/go-redis/v9"
 	"github.com/zeebo/assert"
 )
