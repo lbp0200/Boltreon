@@ -29,7 +29,7 @@ func TestSetAndGet(t *testing.T) {
 
 	// Test GET non-existent key
 	value, err = store.Get("nonexistent")
-	assert.NoError(t, err)
+	assert.Error(t, err)
 	assert.Equal(t, "", value)
 }
 

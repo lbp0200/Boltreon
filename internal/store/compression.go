@@ -44,7 +44,8 @@ func compressData(data []byte, compressionType CompressionType) ([]byte, error) 
 // decompressData 解压缩数据
 func decompressData(data []byte) ([]byte, error) {
 	if len(data) == 0 {
-		return data, nil
+		// 返回非空的空切片，避免 nil 问题
+		return []byte{}, nil
 	}
 
 	// 检查是否有压缩标记

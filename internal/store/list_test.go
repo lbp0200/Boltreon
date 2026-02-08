@@ -28,7 +28,7 @@ func TestLPush(t *testing.T) {
 	// 多个元素
 	n, err = store.LPush(key, "hello", "test")
 	assert.NoError(t, err)
-	assert.Equal(t, 2, n) // 返回添加的元素数量
+	assert.Equal(t, 3, n) // 返回操作后列表的长度
 
 	// 验证长度
 	length, err := store.LLen(key)
@@ -56,7 +56,7 @@ func TestRPush(t *testing.T) {
 	// 多个元素
 	n, err = store.RPush(key, "world", "test")
 	assert.NoError(t, err)
-	assert.Equal(t, 2, n) // 返回添加的元素数量
+	assert.Equal(t, 3, n) // 返回操作后列表的长度
 
 	// 验证长度
 	length, err := store.LLen(key)
@@ -420,7 +420,7 @@ func TestLPUSHX(t *testing.T) {
 	// 键存在，应该成功
 	count, err = store.LPUSHX(key, "value1", "value2")
 	assert.NoError(t, err)
-	assert.Equal(t, 2, count)
+	assert.Equal(t, 3, count)
 
 	// 验证值
 	val, _ := store.LIndex(key, 0)
@@ -445,7 +445,7 @@ func TestRPUSHX(t *testing.T) {
 	// 键存在，应该成功
 	count, err = store.RPUSHX(key, "value1", "value2")
 	assert.NoError(t, err)
-	assert.Equal(t, 2, count)
+	assert.Equal(t, 3, count)
 
 	// 验证值
 	val, _ := store.LIndex(key, 2)

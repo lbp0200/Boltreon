@@ -467,6 +467,11 @@ func (s *BoltreonStore) Persist(key string) (bool, error) {
 
 // RENAME 实现 Redis RENAME 命令，重命名键
 func (s *BoltreonStore) Rename(key, newKey string) error {
+	// 清除读缓存
+	if s.readCache != nil {
+		s.readCache.Delete(key)
+		s.readCache.Delete(newKey)
+	}
 	return s.db.Update(func(txn *badger.Txn) error {
 		// 检查旧键是否存在
 		typeKey := TypeOfKeyGet(key)
@@ -647,12 +652,12 @@ func copyKeysByPrefix(txn *badger.Txn, oldPrefix []byte, oldKey, newKey, keyType
 			// SortedSet使用zset:前缀，格式是zset:oldKey:...
 			// 需要替换为zset:newKey:...
 			oldKeyPrefix := fmt.Sprintf("%s%s:", prefixKeySortedSetBytes, oldKey)
-			newKeyStr = fmt.Sprintf("%s%s%s", prefixKeySortedSetBytes, newKey, oldKeyStr[len(oldKeyPrefix):])
+			newKeyStr = fmt.Sprintf("%s%s:%s", prefixKeySortedSetBytes, newKey, oldKeyStr[len(oldKeyPrefix):])
 		} else {
 			// 其他类型使用TYPE:oldKey:...格式
 			// 需要替换为TYPE:newKey:...
 			oldKeyPrefix := fmt.Sprintf("%s:%s:", keyType, oldKey)
-			newKeyStr = fmt.Sprintf("%s:%s%s", keyType, newKey, oldKeyStr[len(oldKeyPrefix):])
+			newKeyStr = fmt.Sprintf("%s:%s:%s", keyType, newKey, oldKeyStr[len(oldKeyPrefix):])
 		}
 
 		// 复制值

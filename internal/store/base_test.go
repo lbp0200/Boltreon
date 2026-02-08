@@ -257,7 +257,10 @@ func TestDelAllTypes(t *testing.T) {
 			},
 			verify: func(key string) error {
 				_, err := store.Get(key)
-				return err
+				if err == nil {
+					return fmt.Errorf("expected key to be deleted")
+				}
+				return nil
 			},
 		},
 		{
@@ -701,7 +704,7 @@ func TestRenameNX(t *testing.T) {
 
 	// 测试不存在的键
 	success, err = store.RenameNX("nonexistent", "any_key")
-	assert.NoError(t, err)
+	assert.Error(t, err)
 	assert.False(t, success)
 }
 

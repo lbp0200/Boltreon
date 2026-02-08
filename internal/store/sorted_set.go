@@ -1150,8 +1150,9 @@ func (s *BoltreonStore) ZLexCount(zSetName, min, max string) (int64, error) {
 
 // compareLex 比较两个字符串（字典序），支持开区间和闭区间
 // a是范围边界（如"[a"或"(a"），b是要比较的成员
-// inclusive表示是否包含边界
+// inclusive表示a是否包含在比较结果中（a <= b 或 a < b）
 func compareLex(a, b string, inclusive bool) bool {
+	// 处理无穷边界
 	if a == "-" {
 		return true // 负无穷，总是包含
 	}
@@ -1165,30 +1166,55 @@ func compareLex(a, b string, inclusive bool) bool {
 		return true
 	}
 
-	// 提取实际的字符串值
+	// 提取a的实际值和包含性
 	var aVal string
-	var aInclusive bool
+	var aIncl bool
 	if len(a) > 0 {
 		if a[0] == '(' {
 			aVal = a[1:]
-			aInclusive = false
+			aIncl = false
 		} else if a[0] == '[' {
 			aVal = a[1:]
-			aInclusive = true
+			aIncl = true
 		} else {
 			aVal = a
-			aInclusive = inclusive
+			aIncl = inclusive // 当a是普通成员时，使用参数
 		}
 	} else {
 		aVal = a
-		aInclusive = inclusive
+		aIncl = inclusive
 	}
 
-	// 比较
-	if aInclusive {
-		return aVal <= b
+	// 提取b的实际值
+	var bVal string
+	if len(b) > 0 {
+		if b[0] == '(' || b[0] == '[' {
+			bVal = b[1:]
+		} else {
+			bVal = b
+		}
+	} else {
+		bVal = b
 	}
-	return aVal < b
+
+	// 当a是普通成员时，比较类型由b的边界格式决定
+	// 当a是边界格式时，比较类型由a的边界格式决定
+	var useIncl bool
+	if len(a) > 0 && (a[0] == '(' || a[0] == '[') {
+		useIncl = aIncl
+	} else {
+		// a是普通成员，比较类型由b决定
+		if len(b) > 0 && (b[0] == '(' || b[0] == '[') {
+			useIncl = b[0] == '[' // b的包含性
+		} else {
+			useIncl = inclusive
+		}
+	}
+
+	if useIncl {
+		return aVal <= bVal
+	}
+	return aVal < bVal
 }
 
 // ZRangeByLex 实现 Redis ZRANGEBYLEX 命令，返回有序集合中成员值介于min和max之间的成员（字典序）

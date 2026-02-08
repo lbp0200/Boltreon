@@ -531,6 +531,10 @@ func (s *BoltreonStore) GetBit(key string, offset int) (int, error) {
 
 // SetBit 实现 Redis SETBIT 命令，设置指定位的值
 func (s *BoltreonStore) SetBit(key string, offset int, value int) (int, error) {
+	// 清除读缓存
+	if s.readCache != nil {
+		s.readCache.Delete(key)
+	}
 	var oldBit int
 	err := s.db.Update(func(txn *badger.Txn) error {
 		data, err := s.getStringBytes(txn, key)
@@ -615,6 +619,10 @@ func (s *BoltreonStore) BitCount(key string, start, end int) (int, error) {
 
 // BitOp 实现 Redis BITOP 命令，位操作
 func (s *BoltreonStore) BitOp(op string, destKey string, keys ...string) (int, error) {
+	// 清除读缓存
+	if s.readCache != nil {
+		s.readCache.Delete(destKey)
+	}
 	var resultLength int
 	err := s.db.Update(func(txn *badger.Txn) error {
 		if len(keys) == 0 {

@@ -127,7 +127,7 @@ func (s *BoltreonStore) hashKey(key, field string) []byte {
 
 // hashCountKey 方法用于生成哈希表计数器键
 func (s *BoltreonStore) hashCountKey(key string) []byte {
-	return []byte(fmt.Sprintf("%s:%s:count", KeyTypeHash, key))
+	return []byte(fmt.Sprintf("%s:%s:__count__", KeyTypeHash, key))
 }
 
 // HDel 实现 Redis HDEL 命令
@@ -208,7 +208,7 @@ func (s *BoltreonStore) HGetAll(key string) (map[string][]byte, error) {
 			}
 			// 提取字段名
 			_, field := splitHashKey(k)
-			if field == "count" {
+			if field == "__count__" {
 				continue
 			}
 			item := iter.Item()
@@ -260,7 +260,7 @@ func (s *BoltreonStore) getAllHashFields(txn *badger.Txn, key string) ([]string,
 			break
 		}
 		_, field := splitHashKey(k)
-		if field != "count" {
+		if field != "__count__" {
 			fields = append(fields, field)
 		}
 	}
@@ -311,7 +311,7 @@ func (s *BoltreonStore) HVals(key string) ([][]byte, error) {
 				break
 			}
 			_, field := splitHashKey(k)
-			if field == "count" {
+			if field == "__count__" {
 				continue
 			}
 			item := iter.Item()

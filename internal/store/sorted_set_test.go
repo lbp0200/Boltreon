@@ -83,7 +83,7 @@ func TestZScore(t *testing.T) {
 	// 获取不存在的成员
 	_ = store.ZScore
 	_ = exists
-	score, _, err = store.ZScore(zSetName, "nonexistent")
+	score, exists, err = store.ZScore(zSetName, "nonexistent")
 	assert.NoError(t, err)
 	assert.False(t, exists)
 }
