@@ -97,9 +97,18 @@ func (psm *PubSubManager) PSubscribe(subscriber *Subscriber, patterns ...string)
 
 // Unsubscribe 取消订阅频道
 func (psm *PubSubManager) Unsubscribe(subscriber *Subscriber, channels ...string) []string {
+	return psm.unsubscribeInternal(subscriber, channels...)
+}
+
+// unsubscribeInternal 内部实现，不持有psm.mu锁
+func (psm *PubSubManager) unsubscribeInternal(subscriber *Subscriber, channels ...string) []string {
 	psm.mu.Lock()
 	defer psm.mu.Unlock()
+	return psm.unsubscribeLocked(subscriber, channels...)
+}
 
+// unsubscribeLocked 实际执行取消订阅，要求已持有psm.mu锁
+func (psm *PubSubManager) unsubscribeLocked(subscriber *Subscriber, channels ...string) []string {
 	unsubscribed := make([]string, 0)
 
 	if len(channels) == 0 {
@@ -132,9 +141,18 @@ func (psm *PubSubManager) Unsubscribe(subscriber *Subscriber, channels ...string
 
 // PUnsubscribe 取消订阅模式
 func (psm *PubSubManager) PUnsubscribe(subscriber *Subscriber, patterns ...string) []string {
+	return psm.punsubscribeInternal(subscriber, patterns...)
+}
+
+// punsubscribeInternal 内部实现，不持有psm.mu锁
+func (psm *PubSubManager) punsubscribeInternal(subscriber *Subscriber, patterns ...string) []string {
 	psm.mu.Lock()
 	defer psm.mu.Unlock()
+	return psm.punsubscribeLocked(subscriber, patterns...)
+}
 
+// punsubscribeLocked 实际执行取消模式订阅，要求已持有psm.mu锁
+func (psm *PubSubManager) punsubscribeLocked(subscriber *Subscriber, patterns ...string) []string {
 	unsubscribed := make([]string, 0)
 
 	if len(patterns) == 0 {
@@ -244,8 +262,8 @@ func (psm *PubSubManager) RemoveSubscriber(subscriber *Subscriber) {
 	}
 	subscriber.mu.RUnlock()
 
-	psm.Unsubscribe(subscriber, channels...)
-	psm.PUnsubscribe(subscriber, patterns...)
+	psm.unsubscribeLocked(subscriber, channels...)
+	psm.punsubscribeLocked(subscriber, patterns...)
 
 	delete(psm.subscribers, subscriber)
 	close(subscriber.MessageCh)
