@@ -90,18 +90,25 @@ jobs:
             IFS='-' read -r os arch <<< "$osarch"
             ext=""
             if [ "$os" = "windows" ]; then ext=".exe"; fi
-            GOOS=$os GOARCH=$arch go build -o boltreon-${VERSION}-${osarch}${ext} -ldflags "-s -w -X main.version=${VERSION}" ./cmd/boltreon/
+            CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -o boltDB-${VERSION}-${osarch}${ext} -ldflags "-s -w -X main.version=${VERSION}" ./cmd/boltDB/
+            # Sentinel binary
+            CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -o boltDB-sentinel-${VERSION}-${osarch}${ext} -ldflags "-s -w" ./cmd/sentinel/
           done
 
       - name: Upload Release Asset
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            boltreon-*-linux-amd64
-            boltreon-*-linux-arm64
-            boltreon-*-darwin-amd64
-            boltreon-*-darwin-arm64
-            boltreon-*-windows-amd64.exe
+            boltDB-*-linux-amd64
+            boltDB-*-linux-arm64
+            boltDB-*-darwin-amd64
+            boltDB-*-darwin-arm64
+            boltDB-*-windows-amd64.exe
+            boltDB-sentinel-*-linux-amd64
+            boltDB-sentinel-*-linux-arm64
+            boltDB-sentinel-*-darwin-amd64
+            boltDB-sentinel-*-darwin-arm64
+            boltDB-sentinel-*-windows-amd64.exe
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
