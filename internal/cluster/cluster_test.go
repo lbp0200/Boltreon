@@ -145,7 +145,7 @@ func TestClusterCommands(t *testing.T) {
 	// 测试CLUSTER SLOTS
 	slots, err := cmd.HandleCommand([]string{"SLOTS"})
 	assert.NoError(t, err)
-	slotsArr, ok := slots.([]interface{})
+	slotsArr, ok := slots.([][]interface{})
 	assert.True(t, ok)
 	assert.True(t, len(slotsArr) > 0)
 }

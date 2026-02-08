@@ -40,7 +40,10 @@ func TestExecuteCommand(t *testing.T) {
 			cmd:  "PING",
 			args: nil,
 			validate: func(t *testing.T, resp proto.RESP) {
-				assert.Equal(t, proto.OK, resp)
+				// PING should return "PONG"
+				ss, ok := resp.(*proto.SimpleString)
+				assert.True(t, ok)
+				assert.Equal(t, "PONG", string(*ss))
 			},
 		},
 		{
@@ -192,7 +195,7 @@ func TestTCPIntegration(t *testing.T) {
 			validate: func(t *testing.T, resp proto.RESP) {
 				simple, ok := resp.(*proto.SimpleString)
 				assert.True(t, ok)
-				assert.Equal(t, "OK", string(*simple))
+				assert.Equal(t, "PONG", string(*simple))
 			},
 		},
 		{
@@ -220,9 +223,8 @@ func TestTCPIntegration(t *testing.T) {
 			command: "GET",
 			args:    []string{"nonexistent"},
 			validate: func(t *testing.T, resp proto.RESP) {
-				bulk, ok := resp.(*proto.BulkString)
-				assert.True(t, ok)
-				assert.Nil(t, []byte(*bulk))
+				// GET nonexistent should return nil bulk string
+				assert.Nil(t, resp)
 			},
 		},
 		{
