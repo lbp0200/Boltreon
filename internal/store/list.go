@@ -226,8 +226,8 @@ func (s *BotreonStore) RPop(key string) (string, error) {
 		if err := txn.Delete([]byte(endNodeKey)); err != nil {
 			return err
 		}
-		txn.Delete([]byte(s.listKey(key, end, "prev")))
-		txn.Delete([]byte(s.listKey(key, end, "next")))
+		_ = txn.Delete([]byte(s.listKey(key, end, "prev")))
+		_ = txn.Delete([]byte(s.listKey(key, end, "next")))
 
 		// 更新元数据
 		return s.listUpdateMeta(txn, key, length-1, start, newEnd)
@@ -408,8 +408,8 @@ func (s *BotreonStore) LPop(key string) (string, error) {
 		if err := txn.Delete([]byte(startNodeKey)); err != nil {
 			return err
 		}
-		txn.Delete([]byte(s.listKey(key, start, "prev")))
-		txn.Delete([]byte(s.listKey(key, start, "next")))
+		_ = txn.Delete([]byte(s.listKey(key, start, "prev")))
+		_ = txn.Delete([]byte(s.listKey(key, start, "next")))
 
 		// 更新元数据
 		return s.listUpdateMeta(txn, key, length-1, newStart, end)
@@ -644,9 +644,9 @@ func (s *BotreonStore) LTrim(key string, start, stop int64) error {
 
 // deleteNode 删除一个节点
 func (s *BotreonStore) deleteNode(txn *badger.Txn, key, nodeID string) {
-	txn.Delete([]byte(s.listKey(key, nodeID)))
-	txn.Delete([]byte(s.listKey(key, nodeID, "prev")))
-	txn.Delete([]byte(s.listKey(key, nodeID, "next")))
+	_ = txn.Delete([]byte(s.listKey(key, nodeID)))
+	_ = txn.Delete([]byte(s.listKey(key, nodeID, "prev")))
+	_ = txn.Delete([]byte(s.listKey(key, nodeID, "next")))
 }
 
 // deleteList 删除整个列表
@@ -675,9 +675,9 @@ func (s *BotreonStore) deleteList(txn *badger.Txn, key string) error {
 		}
 	}
 	// 删除元数据
-	txn.Delete([]byte(s.listKey(key, "length")))
-	txn.Delete([]byte(s.listKey(key, "start")))
-	txn.Delete([]byte(s.listKey(key, "end")))
+	_ = txn.Delete([]byte(s.listKey(key, "length")))
+	_ = txn.Delete([]byte(s.listKey(key, "start")))
+	_ = txn.Delete([]byte(s.listKey(key, "end")))
 	return nil
 }
 

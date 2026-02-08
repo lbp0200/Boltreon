@@ -103,7 +103,7 @@ func TestIsSlotLocal(t *testing.T) {
 	nodeID, _ := generateNodeID()
 	node := NewNode(nodeID, "127.0.0.1:6380")
 	cluster.AddNode(node)
-	cluster.AssignSlot(100, nodeID)
+	_ = cluster.AssignSlot(100, nodeID)
 
 	assert.False(t, cluster.IsSlotLocal(100))
 }
@@ -191,7 +191,7 @@ func TestRedirectError(t *testing.T) {
 	nodeID, _ := generateNodeID()
 	node := NewNode(nodeID, "127.0.0.1:6380")
 	cluster.AddNode(node)
-	cluster.AssignSlot(100, nodeID)
+	_ = cluster.AssignSlot(100, nodeID)
 
 	// 测试重定向检查
 	redirect := cluster.CheckSlotRedirect("testkey")
@@ -199,9 +199,7 @@ func TestRedirectError(t *testing.T) {
 	if slot == 100 {
 		// 如果槽位恰好是100，应该返回重定向
 		assert.NotNil(t, redirect)
-	} else {
-		// 否则应该返回nil（槽位属于当前节点）
-		// 或者如果槽位被分配给其他节点，返回重定向
 	}
+	_ = node // suppress unused variable warning
 }
 

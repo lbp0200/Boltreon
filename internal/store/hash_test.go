@@ -45,8 +45,8 @@ func TestHGet(t *testing.T) {
 	key := "user:1"
 
 	// 设置字段
-	store.HSet(key, "name", "Alice")
-	store.HSet(key, "age", 30)
+	_ = store.HSet(key, "name", "Alice")
+	_ = store.HSet(key, "age", 30)
 
 	// 获取存在的字段
 	val, err := store.HGet(key, "name")
@@ -67,9 +67,9 @@ func TestHDel(t *testing.T) {
 	key := "user:1"
 
 	// 准备数据
-	store.HSet(key, "name", "Alice")
-	store.HSet(key, "age", 30)
-	store.HSet(key, "city", "Beijing")
+	_ = store.HSet(key, "name", "Alice")
+	_ = store.HSet(key, "age", 30)
+	_ = store.HSet(key, "city", "Beijing")
 
 	// 删除单个字段
 	deleted, err := store.HDel(key, "age")
@@ -108,12 +108,12 @@ func TestHLen(t *testing.T) {
 	assert.Equal(t, uint64(0), count)
 
 	// 添加字段
-	store.HSet(key, "name", "Alice")
+	_ = store.HSet(key, "name", "Alice")
 	count, err = store.HLen(key)
 	assert.NoError(t, err)
 	assert.Equal(t, uint64(1), count)
 
-	store.HSet(key, "age", 30)
+	_ = store.HSet(key, "age", 30)
 	count, err = store.HLen(key)
 	assert.NoError(t, err)
 	assert.Equal(t, uint64(2), count)
@@ -132,9 +132,9 @@ func TestHGetAll(t *testing.T) {
 	assert.Equal(t, 0, len(data))
 
 	// 设置字段
-	store.HSet(key, "name", "Alice")
-	store.HSet(key, "age", 30)
-	store.HSet(key, "city", "Beijing")
+	_ = store.HSet(key, "name", "Alice")
+	_ = store.HSet(key, "age", 30)
+	_ = store.HSet(key, "city", "Beijing")
 
 	// 获取所有字段
 	data, err = store.HGetAll(key)
@@ -153,7 +153,7 @@ func TestHExists(t *testing.T) {
 	key := "user:1"
 
 	// 准备数据
-	store.HSet(key, "name", "Alice")
+	_ = store.HSet(key, "name", "Alice")
 
 	// 检查存在的字段
 	exists, err := store.HExists(key, "name")
@@ -184,9 +184,9 @@ func TestHKeys(t *testing.T) {
 	assert.Equal(t, 0, len(fields))
 
 	// 设置字段
-	store.HSet(key, "name", "Alice")
-	store.HSet(key, "age", 30)
-	store.HSet(key, "city", "Beijing")
+	_ = store.HSet(key, "name", "Alice")
+	_ = store.HSet(key, "age", 30)
+	_ = store.HSet(key, "city", "Beijing")
 
 	// 获取所有字段名
 	fields, err = store.HKeys(key)
@@ -216,9 +216,9 @@ func TestHVals(t *testing.T) {
 	assert.Equal(t, 0, len(values))
 
 	// 设置字段
-	store.HSet(key, "name", "Alice")
-	store.HSet(key, "age", 30)
-	store.HSet(key, "city", "Beijing")
+	_ = store.HSet(key, "name", "Alice")
+	_ = store.HSet(key, "age", 30)
+	_ = store.HSet(key, "city", "Beijing")
 
 	// 获取所有字段值
 	values, err = store.HVals(key)

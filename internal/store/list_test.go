@@ -80,7 +80,7 @@ func TestLPop(t *testing.T) {
 	key := "mylist"
 
 	// 设置初始值
-	store.LPush(key, "world", "hello")
+	_, _ = store.LPush(key, "world", "hello")
 
 	// LPOP
 	val, err := store.LPop(key)
@@ -111,7 +111,7 @@ func TestRPop(t *testing.T) {
 	key := "mylist"
 
 	// 设置初始值
-	store.LPush(key, "world", "hello")
+	_, _ = store.LPush(key, "world", "hello")
 
 	// RPOP
 	val, err := store.RPop(key)
@@ -147,7 +147,7 @@ func TestLLen(t *testing.T) {
 	assert.Equal(t, uint64(0), length)
 
 	// 添加元素
-	store.LPush(key, "a", "b", "c")
+	_, _ = store.LPush(key, "a", "b", "c")
 	length, err = store.LLen(key)
 	assert.NoError(t, err)
 	assert.Equal(t, uint64(3), length)
@@ -161,7 +161,7 @@ func TestLIndex(t *testing.T) {
 	key := "mylist"
 
 	// 设置值
-	store.RPush(key, "a", "b", "c")
+	_, _ = store.RPush(key, "a", "b", "c")
 
 	// 正常索引
 	val, err := store.LIndex(key, 0)
@@ -199,7 +199,7 @@ func TestLRange(t *testing.T) {
 	key := "mylist"
 
 	// 设置值
-	store.RPush(key, "a", "b", "c", "d", "e")
+	_, _ = store.RPush(key, "a", "b", "c", "d", "e")
 
 	// 正常范围
 	values, err := store.LRange(key, 0, 2)
@@ -230,7 +230,7 @@ func TestLSet(t *testing.T) {
 	key := "mylist"
 
 	// 设置值
-	store.RPush(key, "a", "b", "c")
+	_, _ = store.RPush(key, "a", "b", "c")
 
 	// 设置索引0
 	err := store.LSet(key, 0, "x")
@@ -253,7 +253,7 @@ func TestLTrim(t *testing.T) {
 	key := "mylist"
 
 	// 设置值
-	store.RPush(key, "a", "b", "c", "d", "e")
+	_, _ = store.RPush(key, "a", "b", "c", "d", "e")
 
 	// 修剪列表
 	err := store.LTrim(key, 1, 3)
@@ -279,7 +279,7 @@ func TestLInsert(t *testing.T) {
 	key := "mylist"
 
 	// 设置值
-	store.RPush(key, "a", "b", "c")
+	_, _ = store.RPush(key, "a", "b", "c")
 
 	// BEFORE插入
 	count, err := store.LInsert(key, "BEFORE", "b", "x")
@@ -311,7 +311,7 @@ func TestLRem(t *testing.T) {
 	key := "mylist"
 
 	// 设置值
-	store.RPush(key, "a", "b", "a", "c", "a", "d")
+	_, _ = store.RPush(key, "a", "b", "a", "c", "a", "d")
 
 	// 删除第一个a
 	count, err := store.LRem(key, 1, "a")
@@ -330,7 +330,7 @@ func TestLRem(t *testing.T) {
 	assert.Equal(t, []string{"b", "c", "d"}, values)
 
 	// 从尾部删除
-	store.RPush(key, "x", "y", "x")
+	_, _ = store.RPush(key, "x", "y", "x")
 	count, err = store.LRem(key, -1, "x")
 	assert.NoError(t, err)
 	assert.Equal(t, 1, count)
@@ -388,7 +388,7 @@ func TestListEdgeCases(t *testing.T) {
 	assert.Equal(t, uint64(0), length)
 
 	// 单个元素
-	store.LPush(key, "single")
+	_, _ = store.LPush(key, "single")
 	val, _ = store.LPop(key)
 	assert.Equal(t, "single", val)
 	length, _ = store.LLen(key)
@@ -396,7 +396,7 @@ func TestListEdgeCases(t *testing.T) {
 
 	// 大量元素
 	for i := 0; i < 100; i++ {
-		store.RPush(key, "item")
+		_, _ = store.RPush(key, "item")
 	}
 	length, _ = store.LLen(key)
 	assert.Equal(t, uint64(100), length)

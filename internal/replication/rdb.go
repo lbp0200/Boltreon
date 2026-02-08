@@ -50,7 +50,7 @@ func (enc *RDBEncoder) WriteKeyValue(key string, value interface{}, keyType stri
 		now := time.Now().Unix()
 		expireTime := now + ttl
 		enc.buf.WriteByte(0xFD) // FD = expire time in seconds
-		binary.Write(enc.buf, binary.LittleEndian, uint32(expireTime))
+		_ = binary.Write(enc.buf, binary.LittleEndian, uint32(expireTime))
 	}
 
 	// 写入值类型
@@ -105,7 +105,7 @@ func (enc *RDBEncoder) WriteStringKeyValue(key, value string, ttl int64) error {
 		now := time.Now().Unix()
 		expireTime := now + ttl
 		enc.buf.WriteByte(0xFD)
-		binary.Write(enc.buf, binary.LittleEndian, uint32(expireTime))
+		_ = binary.Write(enc.buf, binary.LittleEndian, uint32(expireTime))
 	}
 
 	enc.buf.WriteByte(0) // STRING type
@@ -120,7 +120,7 @@ func (enc *RDBEncoder) WriteListKeyValue(key string, values []string, ttl int64)
 		now := time.Now().Unix()
 		expireTime := now + ttl
 		enc.buf.WriteByte(0xFD)
-		binary.Write(enc.buf, binary.LittleEndian, uint32(expireTime))
+		_ = binary.Write(enc.buf, binary.LittleEndian, uint32(expireTime))
 	}
 
 	enc.buf.WriteByte(1) // LIST type
@@ -138,7 +138,7 @@ func (enc *RDBEncoder) WriteHashKeyValue(key string, fields map[string][]byte, t
 		now := time.Now().Unix()
 		expireTime := now + ttl
 		enc.buf.WriteByte(0xFD)
-		binary.Write(enc.buf, binary.LittleEndian, uint32(expireTime))
+		_ = binary.Write(enc.buf, binary.LittleEndian, uint32(expireTime))
 	}
 
 	enc.buf.WriteByte(3) // HASH type
@@ -157,7 +157,7 @@ func (enc *RDBEncoder) WriteSetKeyValue(key string, members []string, ttl int64)
 		now := time.Now().Unix()
 		expireTime := now + ttl
 		enc.buf.WriteByte(0xFD)
-		binary.Write(enc.buf, binary.LittleEndian, uint32(expireTime))
+		_ = binary.Write(enc.buf, binary.LittleEndian, uint32(expireTime))
 	}
 
 	enc.buf.WriteByte(2) // SET type
@@ -211,7 +211,7 @@ func (enc *RDBEncoder) writeLength(length uint64) {
 	} else {
 		// 32位长度
 		enc.buf.WriteByte(0x80)
-		binary.Write(enc.buf, binary.LittleEndian, uint32(length))
+		_ = binary.Write(enc.buf, binary.LittleEndian, uint32(length))
 	}
 }
 
@@ -261,7 +261,7 @@ func GenerateRDB(s *store.BotreonStore) ([]byte, error) {
 					logger.Logger.Warn().Str("key", key).Err(err).Msg("获取字符串值失败")
 					continue
 				}
-				enc.WriteStringKeyValue(key, value, ttl)
+				_ = enc.WriteStringKeyValue(key, value, ttl)
 
 			case store.KeyTypeList:
 				values, err := s.LRange(key, 0, -1)
@@ -269,7 +269,7 @@ func GenerateRDB(s *store.BotreonStore) ([]byte, error) {
 					logger.Logger.Warn().Str("key", key).Err(err).Msg("获取列表值失败")
 					continue
 				}
-				enc.WriteListKeyValue(key, values, ttl)
+				_ = enc.WriteListKeyValue(key, values, ttl)
 
 			case store.KeyTypeHash:
 				fields, err := s.HGetAll(key)
@@ -277,7 +277,7 @@ func GenerateRDB(s *store.BotreonStore) ([]byte, error) {
 					logger.Logger.Warn().Str("key", key).Err(err).Msg("获取哈希值失败")
 					continue
 				}
-				enc.WriteHashKeyValue(key, fields, ttl)
+				_ = enc.WriteHashKeyValue(key, fields, ttl)
 
 			case store.KeyTypeSet:
 				members, err := s.SMembers(key)
@@ -285,7 +285,7 @@ func GenerateRDB(s *store.BotreonStore) ([]byte, error) {
 					logger.Logger.Warn().Str("key", key).Err(err).Msg("获取集合值失败")
 					continue
 				}
-				enc.WriteSetKeyValue(key, members, ttl)
+				_ = enc.WriteSetKeyValue(key, members, ttl)
 
 			case store.KeyTypeSortedSet:
 				// SortedSet需要特殊处理
@@ -299,7 +299,7 @@ func GenerateRDB(s *store.BotreonStore) ([]byte, error) {
 					now := time.Now().Unix()
 					expireTime := now + ttl
 					enc.buf.WriteByte(0xFD)
-					binary.Write(enc.buf, binary.LittleEndian, uint32(expireTime))
+					_ = binary.Write(enc.buf, binary.LittleEndian, uint32(expireTime))
 				}
 				enc.buf.WriteByte(4) // ZSET type
 				enc.writeString(key)

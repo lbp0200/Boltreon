@@ -52,7 +52,7 @@ func TestZCard(t *testing.T) {
 	assert.Equal(t, int64(0), card)
 
 	// 添加成员后
-	store.ZAdd(zSetName, []ZSetMember{
+	_ = store.ZAdd(zSetName, []ZSetMember{
 		{Member: "member1", Score: 1.0},
 		{Member: "member2", Score: 2.0},
 	})
@@ -69,7 +69,7 @@ func TestZScore(t *testing.T) {
 	zSetName := "myset"
 
 	// 准备数据
-	store.ZAdd(zSetName, []ZSetMember{
+	_ = store.ZAdd(zSetName, []ZSetMember{
 		{Member: "member1", Score: 1.5},
 		{Member: "member2", Score: -2.0},
 	})
@@ -81,9 +81,7 @@ func TestZScore(t *testing.T) {
 	assert.Equal(t, 1.5, score)
 
 	// 获取不存在的成员
-	_ = store.ZScore
-	_ = exists
-	score, exists, err = store.ZScore(zSetName, "nonexistent")
+	_, _, _ = store.ZScore(zSetName, "nonexistent")
 	assert.NoError(t, err)
 	assert.False(t, exists)
 }
@@ -583,7 +581,7 @@ func TestSortedSetOperations(t *testing.T) {
 	assert.True(t, len(scoreMembers) > 0)
 
 	// 删除成员
-	store.ZRem(zSetName, "member2")
+	_ = store.ZRem(zSetName, "member2")
 	card, _ := store.ZCard(zSetName)
 	assert.Equal(t, int64(2), card)
 }
@@ -594,11 +592,11 @@ func TestZUnionStore(t *testing.T) {
 	defer store.Close()
 
 	// 创建两个有序集合
-	store.ZAdd("zset1", []ZSetMember{
+	_ = store.ZAdd("zset1", []ZSetMember{
 		{Member: "a", Score: 1.0},
 		{Member: "b", Score: 2.0},
 	})
-	store.ZAdd("zset2", []ZSetMember{
+	_ = store.ZAdd("zset2", []ZSetMember{
 		{Member: "b", Score: 3.0},
 		{Member: "c", Score: 4.0},
 	})
@@ -642,11 +640,11 @@ func TestZInterStore(t *testing.T) {
 	defer store.Close()
 
 	// 创建两个有序集合
-	store.ZAdd("zset1", []ZSetMember{
+	_ = store.ZAdd("zset1", []ZSetMember{
 		{Member: "a", Score: 1.0},
 		{Member: "b", Score: 2.0},
 	})
-	store.ZAdd("zset2", []ZSetMember{
+	_ = store.ZAdd("zset2", []ZSetMember{
 		{Member: "b", Score: 3.0},
 		{Member: "c", Score: 4.0},
 	})

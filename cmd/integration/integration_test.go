@@ -393,6 +393,7 @@ func _TestKeyCommands(t *testing.T) {
 	keys, cursor, err = testClient.Scan(ctx, cursor, "scan_*", 0).Result()
 	assert.NoError(t, err)
 	assert.Equal(t, 2, len(keys))
+	_ = cursor // suppress unused variable warning
 }
 
 // TestListCommands 测试List类型命令

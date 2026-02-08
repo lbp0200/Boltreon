@@ -574,7 +574,7 @@ func (s *BotreonStore) SInterStore(destination string, keys ...string) (int, err
 		if err == nil {
 			for _, member := range existingMembers {
 				memberKey := s.setKey(destination, "member", member)
-				txn.Delete([]byte(memberKey))
+				_ = txn.Delete([]byte(memberKey))
 			}
 		}
 
@@ -624,7 +624,7 @@ func (s *BotreonStore) SUnionStore(destination string, keys ...string) (int, err
 		if err == nil {
 			for _, member := range existingMembers {
 				memberKey := s.setKey(destination, "member", member)
-				txn.Delete([]byte(memberKey))
+				_ = txn.Delete([]byte(memberKey))
 			}
 		}
 
@@ -687,7 +687,7 @@ func (s *BotreonStore) SDiffStore(destination string, keys ...string) (int, erro
 		if err == nil {
 			for _, member := range existingMembers {
 				memberKey := s.setKey(destination, "member", member)
-				txn.Delete([]byte(memberKey))
+				_ = txn.Delete([]byte(memberKey))
 			}
 		}
 

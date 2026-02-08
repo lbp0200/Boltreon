@@ -90,7 +90,7 @@ func TestSIsMember(t *testing.T) {
 	key := "myset"
 
 	// 准备数据
-	store.SAdd(key, "apple", "banana")
+	_, _ = store.SAdd(key, "apple", "banana")
 
 	// 检查存在的成员
 	exists, err := store.SIsMember(key, "apple")

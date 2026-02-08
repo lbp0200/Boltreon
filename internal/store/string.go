@@ -300,38 +300,6 @@ func (s *BotreonStore) DECRBY(key string, decrement int64) (int64, error) {
 	return s.INCRBY(key, -decrement)
 }
 
-// getFloatValue 获取浮点数值
-func (s *BotreonStore) getFloatValue(txn *badger.Txn, key string) (float64, error) {
-	strKey := s.stringKey(key)
-	item, err := txn.Get([]byte(strKey))
-	if err != nil {
-		if errors.Is(err, badger.ErrKeyNotFound) {
-			return 0, nil // 键不存在时返回0
-		}
-		return 0, err
-	}
-	val, err := s.getValueWithDecompression(item)
-	if err != nil {
-		return 0, err
-	}
-	floatVal, err := strconv.ParseFloat(string(val), 64)
-	if err != nil {
-		return 0, fmt.Errorf("value is not a number")
-	}
-	return floatVal, nil
-}
-
-// setFloatValue 设置浮点数值
-func (s *BotreonStore) setFloatValue(txn *badger.Txn, key string, value float64) error {
-	if err := txn.Set(TypeOfKeyGet(key), []byte(KeyTypeString)); err != nil {
-		return err
-	}
-	strKey := s.stringKey(key)
-	// 使用科学计数法避免精度问题
-	valueBytes := []byte(strconv.FormatFloat(value, 'f', -1, 64))
-	return s.setValueWithCompression(txn, []byte(strKey), valueBytes)
-}
-
 // INCRBYFLOAT 实现 Redis INCRBYFLOAT 命令，将键的值增加指定浮点数
 func (s *BotreonStore) INCRBYFLOAT(key string, increment float64) (float64, error) {
 	// 先读取旧值（在 View 事务中）

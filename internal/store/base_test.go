@@ -359,7 +359,7 @@ func TestDelLargeDataset(t *testing.T) {
 
 	// 创建大量数据
 	for i := 0; i < 100; i++ {
-		store.HSet(key, string(rune('a'+i)), i)
+		_ = store.HSet(key, string(rune('a'+i)), i)
 	}
 
 	// 验证存在
@@ -439,13 +439,13 @@ func TestExists(t *testing.T) {
 	assert.False(t, exists)
 
 	// 设置键
-	store.Set(key, "value")
+	_ = store.Set(key, "value")
 	exists, err = store.Exists(key)
 	assert.NoError(t, err)
 	assert.True(t, exists)
 
 	// 删除键
-	store.Del(key)
+	_ = store.Del(key)
 	exists, err = store.Exists(key)
 	assert.NoError(t, err)
 	assert.False(t, exists)
@@ -462,31 +462,31 @@ func TestType(t *testing.T) {
 	assert.Equal(t, "none", keyType)
 
 	// String类型
-	store.Set("str_key", "value")
+	_ = store.Set("str_key", "value")
 	keyType, err = store.Type("str_key")
 	assert.NoError(t, err)
 	assert.Equal(t, "string", keyType)
 
 	// List类型
-	store.LPush("list_key", "value")
+	_, _ = store.LPush("list_key", "value")
 	keyType, err = store.Type("list_key")
 	assert.NoError(t, err)
 	assert.Equal(t, "list", keyType)
 
 	// Hash类型
-	store.HSet("hash_key", "field", "value")
+	_ = store.HSet("hash_key", "field", "value")
 	keyType, err = store.Type("hash_key")
 	assert.NoError(t, err)
 	assert.Equal(t, "hash", keyType)
 
 	// Set类型
-	store.SAdd("set_key", "member")
+	_, _ = store.SAdd("set_key", "member")
 	keyType, err = store.Type("set_key")
 	assert.NoError(t, err)
 	assert.Equal(t, "set", keyType)
 
 	// SortedSet类型
-	store.ZAdd("zset_key", []ZSetMember{{Member: "member", Score: 1.0}})
+	_ = store.ZAdd("zset_key", []ZSetMember{{Member: "member", Score: 1.0}})
 	keyType, err = store.Type("zset_key")
 	assert.NoError(t, err)
 	assert.Equal(t, "zset", keyType)
@@ -500,7 +500,7 @@ func TestExpire(t *testing.T) {
 	key := "test_expire"
 
 	// 设置键
-	store.Set(key, "value")
+	_ = store.Set(key, "value")
 
 	// 设置过期时间
 	success, err := store.Expire(key, 10)
@@ -531,13 +531,13 @@ func TestTTL(t *testing.T) {
 	assert.Equal(t, int64(-2), ttl)
 
 	// 设置键（无过期时间）
-	store.Set(key, "value")
+	_ = store.Set(key, "value")
 	ttl, err = store.TTL(key)
 	assert.NoError(t, err)
 	assert.Equal(t, int64(-1), ttl) // -1表示没有过期时间
 
 	// 设置过期时间
-	store.Expire(key, 10)
+	_, _ = store.Expire(key, 10)
 	ttl, err = store.TTL(key)
 	assert.NoError(t, err)
 	assert.True(t, ttl > 0 && ttl <= 10)
@@ -556,13 +556,13 @@ func TestPTTL(t *testing.T) {
 	assert.Equal(t, int64(-2), pttl)
 
 	// 设置键（无过期时间）
-	store.Set(key, "value")
+	_ = store.Set(key, "value")
 	pttl, err = store.PTTL(key)
 	assert.NoError(t, err)
 	assert.Equal(t, int64(-1), pttl) // -1表示没有过期时间
 
 	// 设置过期时间（毫秒）
-	store.PExpire(key, 10000)
+	_, _ = store.PExpire(key, 10000)
 	pttl, err = store.PTTL(key)
 	assert.NoError(t, err)
 	assert.True(t, pttl > 0 && pttl <= 10000)
@@ -576,13 +576,13 @@ func TestPersist(t *testing.T) {
 	key := "test_persist"
 
 	// 设置键（无过期时间）
-	store.Set(key, "value")
+	_ = store.Set(key, "value")
 	success, err := store.Persist(key)
 	assert.NoError(t, err)
 	assert.False(t, success) // 没有TTL，返回false
 
 	// 设置过期时间
-	store.Expire(key, 10)
+	_, _ = store.Expire(key, 10)
 	ttl, _ := store.TTL(key)
 	assert.True(t, ttl > 0)
 
@@ -611,7 +611,7 @@ func TestRename(t *testing.T) {
 	newKey := "new_key"
 
 	// 测试String类型
-	store.Set(oldKey, "value")
+	_ = store.Set(oldKey, "value")
 	err := store.Rename(oldKey, newKey)
 	assert.NoError(t, err)
 
@@ -624,7 +624,7 @@ func TestRename(t *testing.T) {
 	assert.Equal(t, "value", val)
 
 	// 测试List类型
-	store.LPush("list_old", "value1", "value2")
+	_, _ = store.LPush("list_old", "value1", "value2")
 	err = store.Rename("list_old", "list_new")
 	assert.NoError(t, err)
 
@@ -632,7 +632,7 @@ func TestRename(t *testing.T) {
 	assert.Equal(t, 2, length)
 
 	// 测试Hash类型
-	store.HSet("hash_old", "field", "value")
+	_ = store.HSet("hash_old", "field", "value")
 	err = store.Rename("hash_old", "hash_new")
 	assert.NoError(t, err)
 
@@ -640,7 +640,7 @@ func TestRename(t *testing.T) {
 	assert.NotNil(t, valBytes)
 
 	// 测试Set类型
-	store.SAdd("set_old", "member1", "member2")
+	_, _ = store.SAdd("set_old", "member1", "member2")
 	err = store.Rename("set_old", "set_new")
 	assert.NoError(t, err)
 
@@ -648,7 +648,7 @@ func TestRename(t *testing.T) {
 	assert.Equal(t, uint64(2), count)
 
 	// 测试SortedSet类型
-	store.ZAdd("zset_old", []ZSetMember{
+	_ = store.ZAdd("zset_old", []ZSetMember{
 		{Member: "member1", Score: 1.0},
 		{Member: "member2", Score: 2.0},
 	})
@@ -659,8 +659,8 @@ func TestRename(t *testing.T) {
 	assert.Equal(t, int64(2), card)
 
 	// 测试重命名到已存在的键（应该覆盖）
-	store.Set("key1", "value1")
-	store.Set("key2", "value2")
+	_ = store.Set("key1", "value1")
+	_ = store.Set("key2", "value2")
 	err = store.Rename("key1", "key2")
 	assert.NoError(t, err)
 
@@ -681,7 +681,7 @@ func TestRenameNX(t *testing.T) {
 	newKey := "new_key"
 
 	// 设置旧键
-	store.Set(oldKey, "value")
+	_ = store.Set(oldKey, "value")
 
 	// 新键不存在，应该成功
 	success, err := store.RenameNX(oldKey, newKey)
@@ -693,7 +693,7 @@ func TestRenameNX(t *testing.T) {
 	assert.Equal(t, "value", val)
 
 	// 再次尝试重命名（新键已存在）
-	store.Set(oldKey, "value2")
+	_ = store.Set(oldKey, "value2")
 	success, err = store.RenameNX(oldKey, newKey)
 	assert.NoError(t, err)
 	assert.False(t, success)
@@ -714,11 +714,11 @@ func TestKeys(t *testing.T) {
 	defer store.Close()
 
 	// 创建多个键
-	store.Set("user:1", "value1")
-	store.Set("user:2", "value2")
-	store.Set("order:1", "value3")
-	store.LPush("list:1", "item1")
-	store.HSet("hash:1", "field", "value")
+	_ = store.Set("user:1", "value1")
+	_ = store.Set("user:2", "value2")
+	_ = store.Set("order:1", "value3")
+	_, _ = store.LPush("list:1", "item1")
+	_ = store.HSet("hash:1", "field", "value")
 
 	// 测试匹配所有键
 	keys, err := store.Keys("*")
@@ -747,7 +747,7 @@ func TestScan(t *testing.T) {
 
 	// 创建多个键
 	for i := 0; i < 20; i++ {
-		store.Set(fmt.Sprintf("key:%d", i), "value")
+		_ = store.Set(fmt.Sprintf("key:%d", i), "value")
 	}
 
 	// 测试SCAN
@@ -776,9 +776,9 @@ func TestRandomKey(t *testing.T) {
 	assert.Equal(t, "", key)
 
 	// 有键的数据库
-	store.Set("key1", "value1")
-	store.Set("key2", "value2")
-	store.Set("key3", "value3")
+	_ = store.Set("key1", "value1")
+	_ = store.Set("key2", "value2")
+	_ = store.Set("key3", "value3")
 
 	key, err = store.RandomKey()
 	assert.NoError(t, err)
