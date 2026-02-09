@@ -29,11 +29,19 @@ func NewSentinelHandler(sentinel *Sentinel) *SentinelHandler {
 
 // HandleConnection 处理连接
 func (sh *SentinelHandler) HandleConnection(conn net.Conn) {
-	defer func() { _ = conn.Close() }()
+	defer func() {
+		if err := conn.Close(); err != nil {
+			logger.Logger.Debug().Err(err).Msg("failed to close connection")
+		}
+	}()
 
 	reader := bufio.NewReader(conn)
 	writer := bufio.NewWriter(conn)
-	defer func() { _ = writer.Flush() }()
+	defer func() {
+		if err := writer.Flush(); err != nil {
+			logger.Logger.Debug().Err(err).Msg("failed to flush writer")
+		}
+	}()
 
 	for {
 		req, err := proto.ReadRESP(reader)
@@ -44,7 +52,9 @@ func (sh *SentinelHandler) HandleConnection(conn net.Conn) {
 
 		if len(req.Args) == 0 {
 			_ = proto.WriteRESP(writer, proto.NewError("ERR no command"))
-			_ = writer.Flush()
+			if err := writer.Flush(); err != nil {
+				logger.Logger.Debug().Err(err).Msg("failed to flush writer")
+			}
 			continue
 		}
 

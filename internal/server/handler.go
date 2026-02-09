@@ -40,16 +40,24 @@ func (h *Handler) handleConnection(conn net.Conn) {
 	logger.Logger.Debug().Str("remote_addr", remoteAddr).Msg("新连接建立")
 	defer func() {
 		logger.Logger.Debug().Str("remote_addr", remoteAddr).Msg("连接关闭")
-		_ = conn.Close()
+		if err := conn.Close(); err != nil {
+			logger.Logger.Debug().Err(err).Msg("failed to close connection")
+		}
 	}()
 
 	reader := bufio.NewReader(conn)
 	writer := bufio.NewWriter(conn)
-	defer func() { _ = writer.Flush() }()
+	defer func() {
+		if err := writer.Flush(); err != nil {
+			logger.Logger.Debug().Err(err).Msg("failed to flush writer")
+		}
+	}()
 
 	// 设置 TCP_NODELAY 以减少延迟
 	if tcpConn, ok := conn.(*net.TCPConn); ok {
-		_ = tcpConn.SetNoDelay(true)
+		if err := tcpConn.SetNoDelay(true); err != nil {
+			logger.Logger.Debug().Err(err).Msg("failed to set TCP_NODELAY")
+		}
 	}
 
 	for {
@@ -65,7 +73,9 @@ func (h *Handler) handleConnection(conn net.Conn) {
 		if len(args) == 0 {
 			logger.Logger.Warn().Str("remote_addr", remoteAddr).Msg("收到空命令")
 			_ = proto.WriteRESP(writer, proto.NewError("ERR no command"))
-			_ = writer.Flush()
+			if err := writer.Flush(); err != nil {
+				logger.Logger.Debug().Err(err).Msg("failed to flush writer")
+			}
 			continue
 		}
 		cmd := strings.ToUpper(string(args[0]))

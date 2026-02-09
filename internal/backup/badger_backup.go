@@ -47,7 +47,11 @@ func (bbm *BadgerBackupManager) Backup(backupDir string) (string, error) {
 		logger.Logger.Error().Err(err).Str("backup_file", cleanFile).Msg("create backup file failed")
 		return "", fmt.Errorf("create backup file failed: %w", err)
 	}
-	defer func() { _ = file.Close() }()
+	defer func() {
+		if err := file.Close(); err != nil {
+			logger.Logger.Error().Err(err).Str("backup_file", backupFile).Msg("failed to close backup file")
+		}
+	}()
 
 	// 执行备份
 	_, err = bbm.db.Backup(file, 0)
@@ -85,7 +89,11 @@ func (bbm *BadgerBackupManager) IncrementalBackup(backupDir string, since uint64
 		logger.Logger.Error().Err(err).Str("backup_file", cleanFile).Msg("create backup file failed")
 		return "", fmt.Errorf("create backup file failed: %w", err)
 	}
-	defer func() { _ = file.Close() }()
+	defer func() {
+		if err := file.Close(); err != nil {
+			logger.Logger.Error().Err(err).Str("backup_file", backupFile).Msg("failed to close backup file")
+		}
+	}()
 
 	// 执行增量备份
 	_, err = bbm.db.Backup(file, since)
@@ -109,7 +117,11 @@ func (bbm *BadgerBackupManager) Restore(backupFile string) error {
 	if err != nil {
 		return fmt.Errorf("open backup file failed: %w", err)
 	}
-	defer func() { _ = file.Close() }()
+	defer func() {
+		if err := file.Close(); err != nil {
+			logger.Logger.Error().Err(err).Str("backup_file", backupFile).Msg("failed to close backup file")
+		}
+	}()
 
 	// 执行恢复
 	err = bbm.db.Load(file, 1)
@@ -134,7 +146,11 @@ func RestoreTo(backupFile, dbPath string) error {
 		logger.Logger.Error().Err(err).Str("db_path", dbPath).Msg("open target database failed")
 		return fmt.Errorf("open target database failed: %w", err)
 	}
-	defer func() { _ = db.Close() }()
+	defer func() {
+		if err := db.Close(); err != nil {
+			logger.Logger.Error().Err(err).Str("db_path", dbPath).Msg("failed to close database")
+		}
+	}()
 
 	// 打开备份文件
 	// nosec G304 - backupFile is validated by caller
@@ -143,7 +159,11 @@ func RestoreTo(backupFile, dbPath string) error {
 		logger.Logger.Error().Err(err).Str("backup_file", backupFile).Msg("open backup file failed")
 		return fmt.Errorf("open backup file failed: %w", err)
 	}
-	defer func() { _ = file.Close() }()
+	defer func() {
+		if err := file.Close(); err != nil {
+			logger.Logger.Error().Err(err).Str("backup_file", backupFile).Msg("failed to close backup file")
+		}
+	}()
 
 	// 执行恢复
 	err = db.Load(file, 1)
@@ -207,14 +227,22 @@ func CopyBackup(src, dst string) error {
 	if err != nil {
 		return fmt.Errorf("open source file failed: %w", err)
 	}
-	defer func() { _ = srcFile.Close() }()
+	defer func() {
+		if err := srcFile.Close(); err != nil {
+			logger.Logger.Error().Err(err).Str("src", src).Msg("failed to close source file")
+		}
+	}()
 
 	// nosec G304 - dst is validated by caller
 	dstFile, err := os.Create(dst)
 	if err != nil {
 		return fmt.Errorf("create destination file failed: %w", err)
 	}
-	defer func() { _ = dstFile.Close() }()
+	defer func() {
+		if err := dstFile.Close(); err != nil {
+			logger.Logger.Error().Err(err).Str("dst", dst).Msg("failed to close destination file")
+		}
+	}()
 
 	_, err = io.Copy(dstFile, srcFile)
 	if err != nil {

@@ -105,7 +105,9 @@ func (rm *ReplicationManager) RemoveSlave(slaveID string) {
 	defer rm.mu.Unlock()
 	if slave, exists := rm.slaves[slaveID]; exists {
 		delete(rm.slaves, slaveID)
-		_ = slave.Close()
+		if err := slave.Close(); err != nil {
+			logger.Logger.Debug().Err(err).Str("slave_id", slaveID).Msg("failed to close slave connection")
+		}
 		logger.Logger.Info().
 			Str("slave_id", slaveID).
 			Msg("移除从节点连接")
@@ -228,13 +230,17 @@ func (rm *ReplicationManager) Stop() {
 
 	// 关闭所有从节点连接
 	for _, slave := range rm.slaves {
-		_ = slave.Close()
+		if err := slave.Close(); err != nil {
+			logger.Logger.Debug().Err(err).Msg("failed to close slave connection")
+		}
 	}
 	rm.slaves = make(map[string]*SlaveConnection)
 
 	// 关闭主节点连接
 	if rm.masterConn != nil {
-		_ = rm.masterConn.Close()
+		if err := rm.masterConn.Close(); err != nil {
+			logger.Logger.Debug().Err(err).Msg("failed to close master connection")
+		}
 		rm.masterConn = nil
 	}
 }

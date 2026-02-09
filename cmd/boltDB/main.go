@@ -28,7 +28,11 @@ func main() {
 	if err != nil {
 		logger.Logger.Fatal().Err(err).Msg("Failed to create store")
 	}
-	defer func() { _ = db.Close() }()
+	defer func() {
+		if err := db.Close(); err != nil {
+			logger.Logger.Error().Err(err).Msg("failed to close database")
+		}
+	}()
 
 	// 初始化复制管理器
 	replMgr := replication.NewReplicationManager(db)

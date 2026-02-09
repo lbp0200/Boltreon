@@ -127,7 +127,11 @@ func StartSlaveReplication(rm *ReplicationManager, store *store.BotreonStore, ma
 
 	// 启动复制goroutine
 	go func() {
-		defer func() { _ = masterConn.Close() }()
+		defer func() {
+			if err := masterConn.Close(); err != nil {
+				logger.Logger.Debug().Err(err).Msg("failed to close master connection")
+			}
+		}()
 
 		// 发送PING
 		if err := masterConn.SendCommand([][]byte{[]byte("PING")}); err != nil {
@@ -257,7 +261,9 @@ func StopSlaveReplication(rm *ReplicationManager) {
 	rm.masterAddr = ""
 
 	if rm.masterConn != nil {
-		_ = rm.masterConn.Close()
+		if err := rm.masterConn.Close(); err != nil {
+			logger.Logger.Debug().Err(err).Msg("failed to close master connection")
+		}
 		rm.masterConn = nil
 	}
 }

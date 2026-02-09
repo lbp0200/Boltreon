@@ -7,6 +7,7 @@ import (
 
 	"github.com/dgraph-io/badger/v4"
 	"github.com/klauspost/compress/zstd"
+	"github.com/lbp0200/BoltDB/internal/logger"
 	lz4 "github.com/pierrec/lz4/v4"
 )
 
@@ -103,7 +104,11 @@ func compressZSTD(data []byte) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("zstd encoder creation error: %w", err)
 	}
-	defer func() { _ = encoder.Close() }()
+	defer func() {
+		if err := encoder.Close(); err != nil {
+			logger.Logger.Debug().Err(err).Msg("failed to close zstd encoder")
+		}
+	}()
 
 	compressed := encoder.EncodeAll(data, nil)
 	
