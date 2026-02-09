@@ -127,7 +127,7 @@ func StartSlaveReplication(rm *ReplicationManager, store *store.BotreonStore, ma
 
 	// 启动复制goroutine
 	go func() {
-		defer masterConn.Close()
+		defer func() { _ = masterConn.Close() }()
 
 		// 发送PING
 		if err := masterConn.SendCommand([][]byte{[]byte("PING")}); err != nil {

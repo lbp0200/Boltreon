@@ -45,7 +45,7 @@ func (h *Handler) handleConnection(conn net.Conn) {
 
 	reader := bufio.NewReader(conn)
 	writer := bufio.NewWriter(conn)
-	defer writer.Flush()
+	defer func() { _ = writer.Flush() }()
 
 	// 设置 TCP_NODELAY 以减少延迟
 	if tcpConn, ok := conn.(*net.TCPConn); ok {

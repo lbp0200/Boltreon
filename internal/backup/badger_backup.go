@@ -40,7 +40,7 @@ func (bbm *BadgerBackupManager) Backup(backupDir string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("create backup file failed: %w", err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	// 执行备份
 	_, err = bbm.db.Backup(file, 0)
@@ -71,7 +71,7 @@ func (bbm *BadgerBackupManager) IncrementalBackup(backupDir string, since uint64
 	if err != nil {
 		return "", fmt.Errorf("create backup file failed: %w", err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	// 执行增量备份
 	_, err = bbm.db.Backup(file, since)
@@ -94,7 +94,7 @@ func (bbm *BadgerBackupManager) Restore(backupFile string) error {
 	if err != nil {
 		return fmt.Errorf("open backup file failed: %w", err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	// 执行恢复
 	err = bbm.db.Load(file, 1)
@@ -117,14 +117,14 @@ func RestoreTo(backupFile, dbPath string) error {
 	if err != nil {
 		return fmt.Errorf("open target database failed: %w", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	// 打开备份文件
 	file, err := os.Open(backupFile)
 	if err != nil {
 		return fmt.Errorf("open backup file failed: %w", err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	// 执行恢复
 	err = db.Load(file, 1)
@@ -146,7 +146,7 @@ func GetBackupInfo(backupFile string) (map[string]interface{}, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open backup file failed: %w", err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	info := make(map[string]interface{})
 
@@ -186,13 +186,13 @@ func CopyBackup(src, dst string) error {
 	if err != nil {
 		return fmt.Errorf("open source file failed: %w", err)
 	}
-	defer srcFile.Close()
+	defer func() { _ = srcFile.Close() }()
 
 	dstFile, err := os.Create(dst)
 	if err != nil {
 		return fmt.Errorf("create destination file failed: %w", err)
 	}
-	defer dstFile.Close()
+	defer func() { _ = dstFile.Close() }()
 
 	_, err = io.Copy(dstFile, srcFile)
 	if err != nil {

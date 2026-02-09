@@ -28,11 +28,11 @@ func NewSentinelHandler(sentinel *Sentinel) *SentinelHandler {
 
 // HandleConnection 处理连接
 func (sh *SentinelHandler) HandleConnection(conn net.Conn) {
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	reader := bufio.NewReader(conn)
 	writer := bufio.NewWriter(conn)
-	defer writer.Flush()
+	defer func() { _ = writer.Flush() }()
 
 	for {
 		req, err := proto.ReadRESP(reader)

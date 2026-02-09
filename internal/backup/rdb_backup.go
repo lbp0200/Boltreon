@@ -94,7 +94,7 @@ func (rbm *RDBBackupManager) GetBackupInfo(backupFile string) (map[string]interf
 	if err != nil {
 		return nil, fmt.Errorf("open backup file failed: %w", err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	info := make(map[string]interface{})
 

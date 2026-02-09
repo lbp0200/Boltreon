@@ -103,7 +103,7 @@ func compressZSTD(data []byte) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("zstd encoder creation error: %w", err)
 	}
-	defer encoder.Close()
+	defer func() { _ = encoder.Close() }()
 
 	compressed := encoder.EncodeAll(data, nil)
 	

@@ -22,7 +22,7 @@ func main() {
 		fmt.Printf("Error connecting: %v\n", err)
 		os.Exit(1)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	// 构建命令
 	args := make([][]byte, len(os.Args)-1)

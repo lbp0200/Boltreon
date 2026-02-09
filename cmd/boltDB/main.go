@@ -28,7 +28,7 @@ func main() {
 	if err != nil {
 		logger.Logger.Fatal().Err(err).Msg("Failed to create store")
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	// 初始化复制管理器
 	replMgr := replication.NewReplicationManager(db)
