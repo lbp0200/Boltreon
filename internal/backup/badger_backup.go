@@ -111,8 +111,10 @@ func (bbm *BadgerBackupManager) IncrementalBackup(backupDir string, since uint64
 
 // Restore 从备份恢复
 func (bbm *BadgerBackupManager) Restore(backupFile string) error {
+	// 验证备份文件路径
+	backupFile = filepath.Clean(backupFile)
+
 	// 打开备份文件
-	// nosec G304 - backupFile is validated by caller
 	file, err := os.Open(backupFile)
 	if err != nil {
 		return fmt.Errorf("open backup file failed: %w", err)
@@ -139,6 +141,9 @@ func (bbm *BadgerBackupManager) Restore(backupFile string) error {
 
 // RestoreTo 恢复到新的数据库
 func RestoreTo(backupFile, dbPath string) error {
+	// 验证备份文件路径
+	backupFile = filepath.Clean(backupFile)
+
 	// 打开目标数据库
 	opts := badger.DefaultOptions(dbPath)
 	db, err := badger.Open(opts)
@@ -153,7 +158,6 @@ func RestoreTo(backupFile, dbPath string) error {
 	}()
 
 	// 打开备份文件
-	// nosec G304 - backupFile is validated by caller
 	file, err := os.Open(backupFile)
 	if err != nil {
 		logger.Logger.Error().Err(err).Str("backup_file", backupFile).Msg("open backup file failed")
@@ -222,7 +226,8 @@ func ListBackups(backupDir string) ([]string, error) {
 
 // CopyBackup 复制备份文件
 func CopyBackup(src, dst string) error {
-	// nosec G304 - src and dst are validated by caller
+	src = filepath.Clean(src)
+	dst = filepath.Clean(dst)
 	srcFile, err := os.Open(src)
 	if err != nil {
 		return fmt.Errorf("open source file failed: %w", err)
@@ -233,7 +238,6 @@ func CopyBackup(src, dst string) error {
 		}
 	}()
 
-	// nosec G304 - dst is validated by caller
 	dstFile, err := os.Create(dst)
 	if err != nil {
 		return fmt.Errorf("create destination file failed: %w", err)

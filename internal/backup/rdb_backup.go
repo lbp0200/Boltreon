@@ -92,7 +92,7 @@ func (rbm *RDBBackupManager) BackupWithCompression(backupDir string) (string, er
 
 // GetBackupInfo 获取备份信息
 func (rbm *RDBBackupManager) GetBackupInfo(backupFile string) (map[string]interface{}, error) {
-	// nosec G304 - backupFile is validated by caller
+	backupFile = filepath.Clean(backupFile)
 	file, err := os.Open(backupFile)
 	if err != nil {
 		logger.Logger.Error().Err(err).Str("backup_file", backupFile).Msg("open backup file failed")

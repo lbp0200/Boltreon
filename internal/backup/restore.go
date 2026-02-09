@@ -37,7 +37,7 @@ func (rm *RestoreManager) RestoreFromRDB(rdbFile string) error {
 		Msg("RDB恢复功能（待实现完整解析）")
 
 	// 读取RDB文件
-	// nosec G304 - rdbFile is validated by caller via RestoreFromPath
+	rdbFile = filepath.Clean(rdbFile)
 	rdbData, err := os.ReadFile(rdbFile)
 	if err != nil {
 		logger.Logger.Error().Err(err).Str("rdb_file", rdbFile).Msg("read RDB file failed")
