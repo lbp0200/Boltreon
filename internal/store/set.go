@@ -1,14 +1,23 @@
 package store
 
 import (
+	"crypto/rand"
+	"encoding/binary"
 	"errors"
-	"math/rand"
 	"strings"
 	"time"
 
 	"github.com/dgraph-io/badger/v4"
 	"github.com/lbp0200/BoltDB/internal/helper"
 )
+
+// randomFloat64 生成 [0, 1) 范围的随机浮点数
+func randomFloat64() float64 {
+	b := make([]byte, 8)
+	_, _ = rand.Read(b)
+	// 将字节转换为 [0, 1) 范围的浮点数
+	return float64(binary.BigEndian.Uint64(b)) / (1 << 64)
+}
 
 // retryUpdate 重试执行 BadgerDB Update 操作，处理事务冲突
 func (s *BotreonStore) retryUpdate(fn func(*badger.Txn) error, maxRetries int) error {
@@ -32,7 +41,7 @@ func (s *BotreonStore) retryUpdate(fn func(*badger.Txn) error, maxRetries int) e
 				baseBackoff = 50 * time.Millisecond
 			}
 			// 添加随机抖动（0-50%），避免雷群效应
-			jitter := time.Duration(rand.Float64() * float64(baseBackoff) * 0.5)
+			jitter := time.Duration(randomFloat64() * float64(baseBackoff) * 0.5)
 			backoff := baseBackoff + jitter
 			time.Sleep(backoff)
 			continue
@@ -224,7 +233,7 @@ func (s *BotreonStore) SPop(key string) (string, error) {
 		}
 
 		// 随机选择一个索引（0 到 count-1）
-		targetIndex := rand.Intn(int(count))
+		targetIndex := randomIntn(int(count))
 
 		// 使用迭代器遍历到目标索引位置
 		prefix := s.setKey(key, "member")
@@ -283,7 +292,7 @@ func (s *BotreonStore) SPopN(key string, count int) ([]string, error) {
 		}
 
 		// 随机选择成员
-		rand.Shuffle(len(allMembers), func(i, j int) {
+		randomShuffle(len(allMembers), func(i, j int) {
 			allMembers[i], allMembers[j] = allMembers[j], allMembers[i]
 		})
 
@@ -328,7 +337,7 @@ func (s *BotreonStore) SRandMember(key string) (string, error) {
 		}
 
 		// 随机选择一个成员
-		index := rand.Intn(len(members))
+		index := randomIntn(len(members))
 		member = members[index]
 		return nil
 	})
@@ -351,7 +360,7 @@ func (s *BotreonStore) SRandMemberN(key string, count int) ([]string, error) {
 		if count < 0 {
 			count = -count
 			for i := 0; i < count; i++ {
-				index := rand.Intn(len(allMembers))
+				index := randomIntn(len(allMembers))
 				members = append(members, allMembers[index])
 			}
 		} else {
@@ -360,7 +369,7 @@ func (s *BotreonStore) SRandMemberN(key string, count int) ([]string, error) {
 				count = len(allMembers)
 			}
 			// 随机选择不重复的成员
-			rand.Shuffle(len(allMembers), func(i, j int) {
+			randomShuffle(len(allMembers), func(i, j int) {
 				allMembers[i], allMembers[j] = allMembers[j], allMembers[i]
 			})
 			members = allMembers[:count]

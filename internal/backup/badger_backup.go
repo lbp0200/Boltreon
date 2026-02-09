@@ -186,11 +186,16 @@ func RestoreTo(backupFile, dbPath string) error {
 
 // GetBackupInfo 获取备份信息
 func GetBackupInfo(backupFile string) (map[string]interface{}, error) {
+	backupFile = filepath.Clean(backupFile)
 	file, err := os.Open(backupFile)
 	if err != nil {
 		return nil, fmt.Errorf("open backup file failed: %w", err)
 	}
-	defer func() { _ = file.Close() }()
+	defer func() {
+		if err := file.Close(); err != nil {
+			logger.Logger.Error().Err(err).Str("backup_file", backupFile).Msg("failed to close backup file")
+		}
+	}()
 
 	info := make(map[string]interface{})
 

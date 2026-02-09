@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"math"
-	"math/rand"
 	"strings"
 	"time"
 
@@ -122,7 +121,7 @@ func (s *BotreonStore) retryUpdateSortedSet(fn func(*badger.Txn) error, maxRetri
 			baseBackoff = 30 * time.Millisecond
 		}
 			// 添加随机抖动（0-50%），避免雷群效应
-			jitter := time.Duration(rand.Float64() * float64(baseBackoff) * 0.5)
+			jitter := time.Duration(randomFloat64() * float64(baseBackoff) * 0.5)
 			backoff := baseBackoff + jitter
 			time.Sleep(backoff)
 			continue
