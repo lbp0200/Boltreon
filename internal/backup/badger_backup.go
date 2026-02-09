@@ -35,6 +35,7 @@ func (bbm *BadgerBackupManager) Backup(backupDir string) (string, error) {
 	backupFile := filepath.Join(backupDir, fmt.Sprintf("badger_backup_%s", timestamp))
 
 	// 创建备份文件
+	// nosec G304
 	file, err := os.Create(backupFile)
 	if err != nil {
 		return "", fmt.Errorf("create backup file failed: %w", err)

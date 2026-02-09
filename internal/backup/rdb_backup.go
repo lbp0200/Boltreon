@@ -75,7 +75,7 @@ func (rbm *RDBBackupManager) BackupWithCompression(backupDir string) (string, er
 	compressedData := rdbData
 
 	// 写入文件
-	if err := os.WriteFile(backupFile, compressedData, 0644); err != nil {
+	if err := os.WriteFile(backupFile, compressedData, 0600); err != nil {
 		return "", fmt.Errorf("write compressed RDB file failed: %w", err)
 	}
 

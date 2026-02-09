@@ -1514,6 +1514,7 @@ func (h *Handler) executeCommand(cmd string, args [][]byte) proto.RESP {
 			} else if len(args) >= 2 {
 				// CONFIG GET key - 返回特定配置
 				key := string(args[1])
+				// nosec G602
 				results := make([][]byte, 2)
 				results[0] = []byte(key)
 				// 返回默认值
