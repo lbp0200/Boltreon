@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/lbp0200/BoltDB/internal/logger"
 	"github.com/lbp0200/BoltDB/internal/proto"
 )
 
@@ -37,6 +38,7 @@ func (sh *SentinelHandler) HandleConnection(conn net.Conn) {
 	for {
 		req, err := proto.ReadRESP(reader)
 		if err != nil {
+			logger.Logger.Debug().Err(err).Msg("Sentinel: read request failed")
 			return
 		}
 
@@ -55,9 +57,11 @@ func (sh *SentinelHandler) HandleConnection(conn net.Conn) {
 		}
 
 		if err := proto.WriteRESP(writer, resp); err != nil {
+			logger.Logger.Debug().Err(err).Msg("Sentinel: write response failed")
 			return
 		}
 		if err := writer.Flush(); err != nil {
+			logger.Logger.Debug().Err(err).Msg("Sentinel: flush failed")
 			return
 		}
 	}

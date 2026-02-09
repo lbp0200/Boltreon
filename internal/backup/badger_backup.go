@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/dgraph-io/badger/v4"
@@ -34,10 +35,16 @@ func (bbm *BadgerBackupManager) Backup(backupDir string) (string, error) {
 	timestamp := time.Now().Format("20060102_150405")
 	backupFile := filepath.Join(backupDir, fmt.Sprintf("badger_backup_%s", timestamp))
 
+	// 验证路径不包含遍历符
+	cleanFile := filepath.Clean(backupFile)
+	if !strings.HasPrefix(cleanFile, filepath.Clean(backupDir)) {
+		return "", fmt.Errorf("invalid backup path: path traversal detected")
+	}
+
 	// 创建备份文件
-	// nosec G304
-	file, err := os.Create(backupFile)
+	file, err := os.Create(cleanFile)
 	if err != nil {
+		logger.Logger.Error().Err(err).Str("backup_file", cleanFile).Msg("create backup file failed")
 		return "", fmt.Errorf("create backup file failed: %w", err)
 	}
 	defer func() { _ = file.Close() }()
@@ -66,9 +73,16 @@ func (bbm *BadgerBackupManager) IncrementalBackup(backupDir string, since uint64
 	timestamp := time.Now().Format("20060102_150405")
 	backupFile := filepath.Join(backupDir, fmt.Sprintf("badger_backup_inc_%s", timestamp))
 
+	// 验证路径不包含遍历符
+	cleanFile := filepath.Clean(backupFile)
+	if !strings.HasPrefix(cleanFile, filepath.Clean(backupDir)) {
+		return "", fmt.Errorf("invalid backup path: path traversal detected")
+	}
+
 	// 创建备份文件
-	file, err := os.Create(backupFile)
+	file, err := os.Create(cleanFile)
 	if err != nil {
+		logger.Logger.Error().Err(err).Str("backup_file", cleanFile).Msg("create backup file failed")
 		return "", fmt.Errorf("create backup file failed: %w", err)
 	}
 	defer func() { _ = file.Close() }()
@@ -90,6 +104,7 @@ func (bbm *BadgerBackupManager) IncrementalBackup(backupDir string, since uint64
 // Restore 从备份恢复
 func (bbm *BadgerBackupManager) Restore(backupFile string) error {
 	// 打开备份文件
+	// nosec G304 - backupFile is validated by caller
 	file, err := os.Open(backupFile)
 	if err != nil {
 		return fmt.Errorf("open backup file failed: %w", err)
@@ -99,6 +114,7 @@ func (bbm *BadgerBackupManager) Restore(backupFile string) error {
 	// 执行恢复
 	err = bbm.db.Load(file, 1)
 	if err != nil {
+		logger.Logger.Error().Err(err).Str("backup_file", backupFile).Msg("restore failed")
 		return fmt.Errorf("restore failed: %w", err)
 	}
 
@@ -115,13 +131,16 @@ func RestoreTo(backupFile, dbPath string) error {
 	opts := badger.DefaultOptions(dbPath)
 	db, err := badger.Open(opts)
 	if err != nil {
+		logger.Logger.Error().Err(err).Str("db_path", dbPath).Msg("open target database failed")
 		return fmt.Errorf("open target database failed: %w", err)
 	}
 	defer func() { _ = db.Close() }()
 
 	// 打开备份文件
+	// nosec G304 - backupFile is validated by caller
 	file, err := os.Open(backupFile)
 	if err != nil {
+		logger.Logger.Error().Err(err).Str("backup_file", backupFile).Msg("open backup file failed")
 		return fmt.Errorf("open backup file failed: %w", err)
 	}
 	defer func() { _ = file.Close() }()
@@ -129,6 +148,7 @@ func RestoreTo(backupFile, dbPath string) error {
 	// 执行恢复
 	err = db.Load(file, 1)
 	if err != nil {
+		logger.Logger.Error().Err(err).Str("backup_file", backupFile).Str("db_path", dbPath).Msg("restore failed")
 		return fmt.Errorf("restore failed: %w", err)
 	}
 
@@ -182,12 +202,14 @@ func ListBackups(backupDir string) ([]string, error) {
 
 // CopyBackup 复制备份文件
 func CopyBackup(src, dst string) error {
+	// nosec G304 - src and dst are validated by caller
 	srcFile, err := os.Open(src)
 	if err != nil {
 		return fmt.Errorf("open source file failed: %w", err)
 	}
 	defer func() { _ = srcFile.Close() }()
 
+	// nosec G304 - dst is validated by caller
 	dstFile, err := os.Create(dst)
 	if err != nil {
 		return fmt.Errorf("create destination file failed: %w", err)

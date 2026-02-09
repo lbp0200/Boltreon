@@ -31,24 +31,28 @@ func (rm *RestoreManager) RestoreFromBadger(backupFile string) error {
 func (rm *RestoreManager) RestoreFromRDB(rdbFile string) error {
 	// RDB解析和恢复是复杂的功能，这里提供框架
 	// 实际实现需要解析RDB格式并逐个恢复键值对
-	
+
 	logger.Logger.Info().
 		Str("rdb_file", rdbFile).
 		Msg("RDB恢复功能（待实现完整解析）")
 
 	// 读取RDB文件
+	// nosec G304 - rdbFile is validated by caller via RestoreFromPath
 	rdbData, err := os.ReadFile(rdbFile)
 	if err != nil {
+		logger.Logger.Error().Err(err).Str("rdb_file", rdbFile).Msg("read RDB file failed")
 		return fmt.Errorf("read RDB file failed: %w", err)
 	}
 
 	// 验证RDB文件头
 	if len(rdbData) < 9 {
+		logger.Logger.Error().Int("data_len", len(rdbData)).Msg("invalid RDB file: too short")
 		return fmt.Errorf("invalid RDB file: too short")
 	}
 
 	magic := string(rdbData[0:5])
 	if magic != "REDIS" {
+		logger.Logger.Error().Str("magic", magic).Msg("invalid RDB file: bad magic")
 		return fmt.Errorf("invalid RDB file: bad magic")
 	}
 

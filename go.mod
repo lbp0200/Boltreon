@@ -10,6 +10,7 @@ require (
 	github.com/redis/go-redis/v9 v9.17.2
 	github.com/rs/zerolog v1.33.0
 	github.com/zeebo/assert v1.3.1
+	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 )
 
 require (

@@ -6,6 +6,7 @@ import (
 
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
+	"gopkg.in/natefinch/lumberjack.v2"
 )
 
 var (
@@ -14,10 +15,8 @@ var (
 )
 
 func init() {
-	// 设置默认输出格式为控制台（带颜色）
-	output := zerolog.ConsoleWriter{Out: os.Stdout, TimeFormat: "2006-01-02 15:04:05.000"}
-
-	// 从环境变量读取日志级别
+	// 从环境变量读取日志配置
+	logFile := os.Getenv("BOLTREON_LOG_FILE")
 	levelStr := os.Getenv("BOLTREON_LOG_LEVEL")
 	if levelStr == "" {
 		levelStr = "warn" // 默认 WARNING 级别
@@ -25,6 +24,28 @@ func init() {
 
 	level := parseLevel(levelStr)
 	zerolog.SetGlobalLevel(level)
+
+	var output interface {
+		Write(p []byte) (n int, err error)
+	}
+
+	if logFile != "" {
+		// 异步日志文件，带轮转
+		output = &lumberjack.Logger{
+			Filename:   logFile,
+			MaxSize:    100, // MB
+			MaxBackups: 7,   // 保留7个备份
+			MaxAge:     30,  // 天
+			Compress:   true,
+		}
+	} else {
+		// 控制台输出（带颜色）
+		consoleWriter := zerolog.ConsoleWriter{
+			Out:     os.Stdout,
+			TimeFormat: "2006-01-02 15:04:05.000",
+		}
+		output = consoleWriter
+	}
 
 	// 创建全局 logger
 	Logger = zerolog.New(output).With().Timestamp().Logger()

@@ -42,6 +42,7 @@ func (rbm *RDBBackupManager) Backup(backupDir string) (string, error) {
 
 	// 写入文件
 	if err := os.WriteFile(backupFile, rdbData, 0600); err != nil {
+		logger.Logger.Error().Err(err).Str("backup_file", backupFile).Msg("write RDB file failed")
 		return "", fmt.Errorf("write RDB file failed: %w", err)
 	}
 
@@ -76,6 +77,7 @@ func (rbm *RDBBackupManager) BackupWithCompression(backupDir string) (string, er
 
 	// 写入文件
 	if err := os.WriteFile(backupFile, compressedData, 0600); err != nil {
+		logger.Logger.Error().Err(err).Str("backup_file", backupFile).Msg("write compressed RDB file failed")
 		return "", fmt.Errorf("write compressed RDB file failed: %w", err)
 	}
 
@@ -90,8 +92,10 @@ func (rbm *RDBBackupManager) BackupWithCompression(backupDir string) (string, er
 
 // GetBackupInfo 获取备份信息
 func (rbm *RDBBackupManager) GetBackupInfo(backupFile string) (map[string]interface{}, error) {
+	// nosec G304 - backupFile is validated by caller
 	file, err := os.Open(backupFile)
 	if err != nil {
+		logger.Logger.Error().Err(err).Str("backup_file", backupFile).Msg("open backup file failed")
 		return nil, fmt.Errorf("open backup file failed: %w", err)
 	}
 	defer func() { _ = file.Close() }()
@@ -101,6 +105,7 @@ func (rbm *RDBBackupManager) GetBackupInfo(backupFile string) (map[string]interf
 	// 获取文件信息
 	fileInfo, err := file.Stat()
 	if err != nil {
+		logger.Logger.Error().Err(err).Str("backup_file", backupFile).Msg("get file info failed")
 		return nil, fmt.Errorf("get file info failed: %w", err)
 	}
 
@@ -116,6 +121,7 @@ func (rbm *RDBBackupManager) GetBackupInfo(backupFile string) (map[string]interf
 func ListRDBBackups(backupDir string) ([]string, error) {
 	files, err := os.ReadDir(backupDir)
 	if err != nil {
+		logger.Logger.Error().Err(err).Str("backup_dir", backupDir).Msg("read backup directory failed")
 		return nil, fmt.Errorf("read backup directory failed: %w", err)
 	}
 

@@ -1514,23 +1514,20 @@ func (h *Handler) executeCommand(cmd string, args [][]byte) proto.RESP {
 			} else if len(args) >= 2 {
 				// CONFIG GET key - 返回特定配置
 				key := string(args[1])
-				// nosec G602
-				results := make([][]byte, 2)
-				results[0] = []byte(key)
-				// 返回默认值
+				var value string
 				switch strings.ToLower(key) {
 				case "save":
-					results[1] = []byte("")
+					value = ""
 				case "appendonly":
-					results[1] = []byte("no")
+					value = "no"
 				case "maxmemory":
-					results[1] = []byte("0")
+					value = "0"
 				case "maxmemory-policy":
-					results[1] = []byte("noeviction")
+					value = "noeviction"
 				default:
-					results[1] = []byte("")
+					value = ""
 				}
-				return &proto.Array{Args: results}
+				return &proto.Array{Args: [][]byte{[]byte(key), []byte(value)}}
 			} else {
 				return proto.NewError("ERR wrong number of arguments for 'CONFIG GET' command")
 			}
