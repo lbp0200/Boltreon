@@ -26,7 +26,7 @@ func NewRDBBackupManager(store *store.BotreonStore) *RDBBackupManager {
 // Backup 执行RDB备份
 func (rbm *RDBBackupManager) Backup(backupDir string) (string, error) {
 	// 创建备份目录
-	if err := os.MkdirAll(backupDir, 0755); err != nil {
+	if err := os.MkdirAll(backupDir, 0750); err != nil {
 		return "", fmt.Errorf("create backup directory failed: %w", err)
 	}
 
@@ -41,7 +41,7 @@ func (rbm *RDBBackupManager) Backup(backupDir string) (string, error) {
 	}
 
 	// 写入文件
-	if err := os.WriteFile(backupFile, rdbData, 0644); err != nil {
+	if err := os.WriteFile(backupFile, rdbData, 0600); err != nil {
 		return "", fmt.Errorf("write RDB file failed: %w", err)
 	}
 
@@ -56,7 +56,7 @@ func (rbm *RDBBackupManager) Backup(backupDir string) (string, error) {
 // BackupWithCompression 执行压缩RDB备份
 func (rbm *RDBBackupManager) BackupWithCompression(backupDir string) (string, error) {
 	// 创建备份目录
-	if err := os.MkdirAll(backupDir, 0755); err != nil {
+	if err := os.MkdirAll(backupDir, 0750); err != nil {
 		return "", fmt.Errorf("create backup directory failed: %w", err)
 	}
 

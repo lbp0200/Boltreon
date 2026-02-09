@@ -40,7 +40,7 @@ func (h *Handler) handleConnection(conn net.Conn) {
 	logger.Logger.Debug().Str("remote_addr", remoteAddr).Msg("新连接建立")
 	defer func() {
 		logger.Logger.Debug().Str("remote_addr", remoteAddr).Msg("连接关闭")
-		conn.Close()
+		_ = conn.Close()
 	}()
 
 	reader := bufio.NewReader(conn)

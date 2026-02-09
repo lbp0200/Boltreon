@@ -105,7 +105,7 @@ func (rm *ReplicationManager) RemoveSlave(slaveID string) {
 	defer rm.mu.Unlock()
 	if slave, exists := rm.slaves[slaveID]; exists {
 		delete(rm.slaves, slaveID)
-		slave.Close()
+		_ = slave.Close()
 		logger.Logger.Info().
 			Str("slave_id", slaveID).
 			Msg("移除从节点连接")
@@ -228,13 +228,13 @@ func (rm *ReplicationManager) Stop() {
 
 	// 关闭所有从节点连接
 	for _, slave := range rm.slaves {
-		slave.Close()
+		_ = slave.Close()
 	}
 	rm.slaves = make(map[string]*SlaveConnection)
 
 	// 关闭主节点连接
 	if rm.masterConn != nil {
-		rm.masterConn.Close()
+		_ = rm.masterConn.Close()
 		rm.masterConn = nil
 	}
 }

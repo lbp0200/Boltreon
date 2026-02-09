@@ -257,7 +257,7 @@ func StopSlaveReplication(rm *ReplicationManager) {
 	rm.masterAddr = ""
 
 	if rm.masterConn != nil {
-		rm.masterConn.Close()
+		_ = rm.masterConn.Close()
 		rm.masterConn = nil
 	}
 }

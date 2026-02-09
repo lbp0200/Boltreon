@@ -26,7 +26,7 @@ func NewBadgerBackupManager(db *badger.DB) *BadgerBackupManager {
 // Backup 执行BadgerDB备份
 func (bbm *BadgerBackupManager) Backup(backupDir string) (string, error) {
 	// 创建备份目录
-	if err := os.MkdirAll(backupDir, 0755); err != nil {
+	if err := os.MkdirAll(backupDir, 0750); err != nil {
 		return "", fmt.Errorf("create backup directory failed: %w", err)
 	}
 
@@ -57,7 +57,7 @@ func (bbm *BadgerBackupManager) Backup(backupDir string) (string, error) {
 // IncrementalBackup 执行增量备份
 func (bbm *BadgerBackupManager) IncrementalBackup(backupDir string, since uint64) (string, error) {
 	// 创建备份目录
-	if err := os.MkdirAll(backupDir, 0755); err != nil {
+	if err := os.MkdirAll(backupDir, 0750); err != nil {
 		return "", fmt.Errorf("create backup directory failed: %w", err)
 	}
 
