@@ -553,6 +553,7 @@ func (s *BotreonStore) Rename(key, newKey string) error {
 			// 保持TTL
 			expiresAt := oldValue.ExpiresAt()
 			if expiresAt > 0 {
+				// #nosec G115 - expiresAt is a valid Unix timestamp within int64 range
 				ttl := time.Until(time.Unix(int64(expiresAt), 0))
 				if ttl > 0 {
 					e := badger.NewEntry(newValueKey, valueBytes).WithTTL(ttl)
