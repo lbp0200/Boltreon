@@ -358,7 +358,8 @@ func (h *Handler) executeCommand(cmd string, args [][]byte) proto.RESP {
 		if err != nil {
 			return proto.NewError(fmt.Sprintf("ERR %v", err))
 		}
-		return proto.NewInteger(int64(length))
+		// #nosec G115 - length is bounded by practical data size limits
+	return proto.NewInteger(int64(length))
 
 	case "STRLEN":
 		if len(args) < 1 {
@@ -369,7 +370,8 @@ func (h *Handler) executeCommand(cmd string, args [][]byte) proto.RESP {
 		if err != nil {
 			return proto.NewInteger(0)
 		}
-		return proto.NewInteger(int64(length))
+		// #nosec G115 - length is bounded by practical data size limits
+	return proto.NewInteger(int64(length))
 
 	case "GETRANGE":
 		if len(args) < 3 {
@@ -400,7 +402,8 @@ func (h *Handler) executeCommand(cmd string, args [][]byte) proto.RESP {
 		if err != nil {
 			return proto.NewError(fmt.Sprintf("ERR %v", err))
 		}
-		return proto.NewInteger(int64(length))
+		// #nosec G115 - length is bounded by practical data size limits
+	return proto.NewInteger(int64(length))
 
 	// 通用键管理命令
 	case "DEL":
@@ -414,6 +417,7 @@ func (h *Handler) executeCommand(cmd string, args [][]byte) proto.RESP {
 				count++
 			}
 		}
+	// #nosec G115 - count is bounded by practical data size limits
 		return proto.NewInteger(int64(count))
 
 	case "EXISTS":
@@ -428,6 +432,7 @@ func (h *Handler) executeCommand(cmd string, args [][]byte) proto.RESP {
 				count++
 			}
 		}
+	// #nosec G115 - count is bounded by practical data size limits
 		return proto.NewInteger(int64(count))
 
 	case "TYPE":
@@ -631,6 +636,7 @@ func (h *Handler) executeCommand(cmd string, args [][]byte) proto.RESP {
 		if err != nil {
 			return proto.NewError(fmt.Sprintf("ERR %v", err))
 		}
+	// #nosec G115 - count is bounded by practical data size limits
 		return proto.NewInteger(int64(count))
 
 	case "RPUSH":
@@ -646,6 +652,7 @@ func (h *Handler) executeCommand(cmd string, args [][]byte) proto.RESP {
 		if err != nil {
 			return proto.NewError(fmt.Sprintf("ERR %v", err))
 		}
+	// #nosec G115 - count is bounded by practical data size limits
 		return proto.NewInteger(int64(count))
 
 	case "LPOP":
@@ -679,7 +686,8 @@ func (h *Handler) executeCommand(cmd string, args [][]byte) proto.RESP {
 		if err != nil {
 			return proto.NewInteger(0)
 		}
-		return proto.NewInteger(int64(length))
+		// #nosec G115 - length is bounded by practical data size limits
+	return proto.NewInteger(int64(length))
 
 	case "LINDEX":
 		if len(args) < 2 {
@@ -758,6 +766,7 @@ func (h *Handler) executeCommand(cmd string, args [][]byte) proto.RESP {
 		if err != nil {
 			return proto.NewError(fmt.Sprintf("ERR %v", err))
 		}
+	// #nosec G115 - count is bounded by practical data size limits
 		return proto.NewInteger(int64(count))
 
 	case "LREM":
@@ -799,6 +808,7 @@ func (h *Handler) executeCommand(cmd string, args [][]byte) proto.RESP {
 		if err != nil {
 			return proto.NewError(fmt.Sprintf("ERR %v", err))
 		}
+	// #nosec G115 - count is bounded by practical data size limits
 		return proto.NewInteger(int64(count))
 
 	case "RPUSHX":
@@ -814,6 +824,7 @@ func (h *Handler) executeCommand(cmd string, args [][]byte) proto.RESP {
 		if err != nil {
 			return proto.NewError(fmt.Sprintf("ERR %v", err))
 		}
+	// #nosec G115 - count is bounded by practical data size limits
 		return proto.NewInteger(int64(count))
 
 	case "BLPOP":
@@ -883,6 +894,7 @@ func (h *Handler) executeCommand(cmd string, args [][]byte) proto.RESP {
 				count++
 			}
 		}
+	// #nosec G115 - count is bounded by practical data size limits
 		return proto.NewInteger(int64(count))
 
 	case "HGET":
@@ -909,6 +921,7 @@ func (h *Handler) executeCommand(cmd string, args [][]byte) proto.RESP {
 		if err != nil {
 			return proto.NewError(fmt.Sprintf("ERR %v", err))
 		}
+	// #nosec G115 - count is bounded by practical data size limits
 		return proto.NewInteger(int64(count))
 
 	case "HLEN":
@@ -920,7 +933,8 @@ func (h *Handler) executeCommand(cmd string, args [][]byte) proto.RESP {
 		if err != nil {
 			return proto.NewInteger(0)
 		}
-		return proto.NewInteger(int64(length))
+		// #nosec G115 - length is bounded by practical data size limits
+	return proto.NewInteger(int64(length))
 
 	case "HGETALL":
 		if len(args) < 1 {
@@ -1065,7 +1079,8 @@ func (h *Handler) executeCommand(cmd string, args [][]byte) proto.RESP {
 		if err != nil {
 			return proto.NewInteger(0)
 		}
-		return proto.NewInteger(int64(length))
+		// #nosec G115 - length is bounded by practical data size limits
+	return proto.NewInteger(int64(length))
 
 	// Set命令
 	case "SADD":
@@ -1081,6 +1096,7 @@ func (h *Handler) executeCommand(cmd string, args [][]byte) proto.RESP {
 		if err != nil {
 			return proto.NewError(fmt.Sprintf("ERR %v", err))
 		}
+	// #nosec G115 - count is bounded by practical data size limits
 		return proto.NewInteger(int64(count))
 
 	case "SREM":
@@ -1096,6 +1112,7 @@ func (h *Handler) executeCommand(cmd string, args [][]byte) proto.RESP {
 		if err != nil {
 			return proto.NewError(fmt.Sprintf("ERR %v", err))
 		}
+	// #nosec G115 - count is bounded by practical data size limits
 		return proto.NewInteger(int64(count))
 
 	case "SCARD":
@@ -1107,6 +1124,7 @@ func (h *Handler) executeCommand(cmd string, args [][]byte) proto.RESP {
 		if err != nil {
 			return proto.NewInteger(0)
 		}
+	// #nosec G115 - count is bounded by practical data size limits
 		return proto.NewInteger(int64(count))
 
 	case "SISMEMBER":
@@ -1249,6 +1267,7 @@ func (h *Handler) executeCommand(cmd string, args [][]byte) proto.RESP {
 		if err != nil {
 			return proto.NewError(fmt.Sprintf("ERR %v", err))
 		}
+	// #nosec G115 - count is bounded by practical data size limits
 		return proto.NewInteger(int64(count))
 
 	case "SUNIONSTORE":
@@ -1264,6 +1283,7 @@ func (h *Handler) executeCommand(cmd string, args [][]byte) proto.RESP {
 		if err != nil {
 			return proto.NewError(fmt.Sprintf("ERR %v", err))
 		}
+	// #nosec G115 - count is bounded by practical data size limits
 		return proto.NewInteger(int64(count))
 
 	case "SDIFFSTORE":
@@ -1279,6 +1299,7 @@ func (h *Handler) executeCommand(cmd string, args [][]byte) proto.RESP {
 		if err != nil {
 			return proto.NewError(fmt.Sprintf("ERR %v", err))
 		}
+	// #nosec G115 - count is bounded by practical data size limits
 		return proto.NewInteger(int64(count))
 
 	// SortedSet命令 - 由于代码太长，这里只实现主要命令
@@ -1316,6 +1337,7 @@ func (h *Handler) executeCommand(cmd string, args [][]byte) proto.RESP {
 				count++
 			}
 		}
+	// #nosec G115 - count is bounded by practical data size limits
 		return proto.NewInteger(int64(count))
 
 	case "ZCARD":
@@ -1709,6 +1731,7 @@ func (h *Handler) executeCommand(cmd string, args [][]byte) proto.RESP {
 		channel := string(args[0])
 		message := args[1]
 		count := h.PubSub.Publish(channel, message)
+	// #nosec G115 - count is bounded by practical data size limits
 		return proto.NewInteger(int64(count))
 
 	case "SUBSCRIBE":

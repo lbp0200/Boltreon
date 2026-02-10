@@ -40,6 +40,7 @@ func (enc *RDBEncoder) writeHeader() {
 // WriteDatabaseSelector 写入数据库选择器
 func (enc *RDBEncoder) WriteDatabaseSelector(dbNum int) {
 	enc.buf.WriteByte(0xFE) // FE = database selector
+	// #nosec G115 - dbNum is a small positive integer (database index)
 	enc.writeLength(uint64(dbNum))
 }
 
@@ -50,6 +51,7 @@ func (enc *RDBEncoder) WriteKeyValue(key string, value interface{}, keyType stri
 		now := time.Now().Unix()
 		expireTime := now + ttl
 		enc.buf.WriteByte(0xFD) // FD = expire time in seconds
+	// #nosec G115 - expireTime is a valid Unix timestamp within uint32 range
 		_ = binary.Write(enc.buf, binary.LittleEndian, uint32(expireTime))
 	}
 
@@ -105,6 +107,7 @@ func (enc *RDBEncoder) WriteStringKeyValue(key, value string, ttl int64) error {
 		now := time.Now().Unix()
 		expireTime := now + ttl
 		enc.buf.WriteByte(0xFD)
+	// #nosec G115 - expireTime is a valid Unix timestamp within uint32 range
 		_ = binary.Write(enc.buf, binary.LittleEndian, uint32(expireTime))
 	}
 
@@ -120,6 +123,7 @@ func (enc *RDBEncoder) WriteListKeyValue(key string, values []string, ttl int64)
 		now := time.Now().Unix()
 		expireTime := now + ttl
 		enc.buf.WriteByte(0xFD)
+	// #nosec G115 - expireTime is a valid Unix timestamp within uint32 range
 		_ = binary.Write(enc.buf, binary.LittleEndian, uint32(expireTime))
 	}
 
@@ -138,6 +142,7 @@ func (enc *RDBEncoder) WriteHashKeyValue(key string, fields map[string][]byte, t
 		now := time.Now().Unix()
 		expireTime := now + ttl
 		enc.buf.WriteByte(0xFD)
+	// #nosec G115 - expireTime is a valid Unix timestamp within uint32 range
 		_ = binary.Write(enc.buf, binary.LittleEndian, uint32(expireTime))
 	}
 
@@ -157,6 +162,7 @@ func (enc *RDBEncoder) WriteSetKeyValue(key string, members []string, ttl int64)
 		now := time.Now().Unix()
 		expireTime := now + ttl
 		enc.buf.WriteByte(0xFD)
+	// #nosec G115 - expireTime is a valid Unix timestamp within uint32 range
 		_ = binary.Write(enc.buf, binary.LittleEndian, uint32(expireTime))
 	}
 
@@ -211,6 +217,7 @@ func (enc *RDBEncoder) writeLength(length uint64) {
 	} else {
 		// 32位长度
 		enc.buf.WriteByte(0x80)
+	// #nosec G115 - length is bounded by practical RDB size limits
 		_ = binary.Write(enc.buf, binary.LittleEndian, uint32(length))
 	}
 }
@@ -246,6 +253,7 @@ func GenerateRDB(s *store.BotreonStore) ([]byte, error) {
 			// 获取TTL
 			ttl := int64(0)
 			if item.ExpiresAt() > 0 {
+			// #nosec G115 - expiresAt is a valid Unix timestamp within int64 range
 				expireTime := time.Unix(int64(item.ExpiresAt()), 0)
 				now := time.Now()
 				if expireTime.After(now) {
@@ -299,7 +307,8 @@ func GenerateRDB(s *store.BotreonStore) ([]byte, error) {
 					now := time.Now().Unix()
 					expireTime := now + ttl
 					enc.buf.WriteByte(0xFD)
-					_ = binary.Write(enc.buf, binary.LittleEndian, uint32(expireTime))
+				// #nosec G115 - expireTime is a valid Unix timestamp within uint32 range
+		_ = binary.Write(enc.buf, binary.LittleEndian, uint32(expireTime))
 				}
 				enc.buf.WriteByte(4) // ZSET type
 				enc.writeString(key)

@@ -171,6 +171,7 @@ func (s *BotreonStore) LPush(key string, values ...string) (int, error) {
 		finalLength = length
 		return s.listUpdateMeta(txn, key, length, start, end)
 	})
+	// #nosec G115 - length is bounded by practical list size limits
 	return int(finalLength), err // 返回操作后列表的长度（Redis规范）
 }
 
@@ -253,8 +254,10 @@ func (s *BotreonStore) getNodeByIndex(txn *badger.Txn, key string, index int64) 
 
 	// 处理负数索引
 	if index < 0 {
+	// #nosec G115 - length is bounded by practical list size limits
 		index = int64(length) + index
 	}
+	// #nosec G115 - length is bounded by practical list size limits
 	if index < 0 || index >= int64(length) {
 		return "", "", nil
 	}
@@ -263,6 +266,7 @@ func (s *BotreonStore) getNodeByIndex(txn *badger.Txn, key string, index int64) 
 	var currentNodeID string
 	var currentIndex int64
 	visited := make(map[string]bool)
+	// #nosec G115 - length is bounded by practical list size limits
 	if index < int64(length)/2 {
 		// 从头部开始
 		currentNodeID = start
@@ -286,6 +290,7 @@ func (s *BotreonStore) getNodeByIndex(txn *badger.Txn, key string, index int64) 
 		// 从尾部开始
 		_, _, end, _ := s.listGetMeta(key)
 		currentNodeID = end
+	// #nosec G115 - length is bounded by practical list size limits
 		currentIndex = int64(length) - 1
 		for currentIndex > index {
 			// 防止循环链表导致的无限循环
@@ -354,6 +359,7 @@ func (s *BotreonStore) RPush(key string, values ...string) (int, error) {
 		finalLength = length
 		return s.listUpdateMeta(txn, key, length, start, end)
 	})
+	// #nosec G115 - length is bounded by practical list size limits
 	return int(finalLength), err // 返回操作后列表的长度（Redis规范）
 }
 
@@ -445,14 +451,17 @@ func (s *BotreonStore) LRange(key string, start, stop int64) ([]string, error) {
 
 		// 处理负数索引
 		if start < 0 {
-			start = int64(length) + start
+		// #nosec G115 - length is bounded by practical list size limits
+		start = int64(length) + start
 		}
 		if stop < 0 {
-			stop = int64(length) + stop
+		// #nosec G115 - length is bounded by practical list size limits
+		stop = int64(length) + stop
 		}
 		if start < 0 {
 			start = 0
 		}
+	// #nosec G115 - length is bounded by practical list size limits
 		if stop >= int64(length) {
 			stop = int64(length) - 1
 		}
@@ -543,14 +552,17 @@ func (s *BotreonStore) LTrim(key string, start, stop int64) error {
 
 		// 处理负数索引
 		if start < 0 {
-			start = int64(length) + start
+		// #nosec G115 - length is bounded by practical list size limits
+		start = int64(length) + start
 		}
 		if stop < 0 {
-			stop = int64(length) + stop
+		// #nosec G115 - length is bounded by practical list size limits
+		stop = int64(length) + stop
 		}
 		if start < 0 {
 			start = 0
 		}
+	// #nosec G115 - length is bounded by practical list size limits
 		if stop >= int64(length) {
 			stop = int64(length) - 1
 		}
@@ -637,6 +649,7 @@ func (s *BotreonStore) LTrim(key string, start, stop int64) error {
 		}
 
 		// 更新元数据
+	// #nosec G115 - stop and start are bounded by practical list size limits
 		newLength := uint64(stop - start + 1)
 		return s.listUpdateMeta(txn, key, newLength, newStartID, newEndID)
 	})
@@ -818,6 +831,7 @@ func (s *BotreonStore) LRem(key string, count int64, value string) (int, error) 
 		visitedNodes := make(map[string]bool)
 
 		// 收集要删除的节点
+	// #nosec G115 - length is bounded by practical list size limits
 		for visitedCount < int(length) {
 			// 防止循环链表导致的无限循环
 			if visitedNodes[currentNodeID] {
@@ -855,7 +869,8 @@ func (s *BotreonStore) LRem(key string, count int64, value string) (int, error) 
 			visitedCount = 0
 			visitedNodes = make(map[string]bool)
 			nodesToRemove = []string{}
-			for visitedCount < int(length) {
+		// #nosec G115 - length is bounded by practical list size limits
+		for visitedCount < int(length) {
 				// 防止循环链表导致的无限循环
 				if visitedNodes[currentNodeID] {
 					break

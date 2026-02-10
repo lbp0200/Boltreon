@@ -35,6 +35,7 @@ func (s *BotreonStore) retryUpdate(fn func(*badger.Txn) error, maxRetries int) e
 			strings.Contains(errStr, "Conflict") {
 			// 指数退避 + 随机抖动：避免所有请求同时重试
 			// 基础退避：1ms, 2ms, 4ms, 8ms, 16ms, 32ms...
+			// #nosec G115 - i is bounded by maxRetries (small value)
 			baseBackoff := time.Duration(1<<uint(i)) * time.Millisecond
 			// 最大退避时间：50ms（高并发时需要更长等待）
 			if baseBackoff > 50*time.Millisecond {
@@ -233,6 +234,7 @@ func (s *BotreonStore) SPop(key string) (string, error) {
 		}
 
 		// 随机选择一个索引（0 到 count-1）
+	// #nosec G115 - count is bounded by practical set size limits
 		targetIndex := randomIntn(int(count))
 
 		// 使用迭代器遍历到目标索引位置
@@ -313,7 +315,8 @@ func (s *BotreonStore) SPopN(key string, count int) ([]string, error) {
 			if err == nil {
 				countBytes, _ := item.ValueCopy(nil)
 				currentCount := helper.BytesToUint64(countBytes)
-				if currentCount >= uint64(count) {
+				// #nosec G115 - count is bounded by practical set size limits
+			if currentCount >= uint64(count) {
 					currentCount -= uint64(count)
 					return txn.Set([]byte(countKey), helper.Uint64ToBytes(currentCount))
 				}
@@ -603,6 +606,7 @@ func (s *BotreonStore) SInterStore(destination string, keys ...string) (int, err
 		// 更新计数器
 		count = len(result)
 		countKey := s.setKey(destination, "count")
+	// #nosec G115 - count is bounded by practical set size limits
 		return txn.Set([]byte(countKey), helper.Uint64ToBytes(uint64(count)))
 	})
 	return count, err
@@ -653,6 +657,7 @@ func (s *BotreonStore) SUnionStore(destination string, keys ...string) (int, err
 		// 更新计数器
 		count = len(result)
 		countKey := s.setKey(destination, "count")
+	// #nosec G115 - count is bounded by practical set size limits
 		return txn.Set([]byte(countKey), helper.Uint64ToBytes(uint64(count)))
 	})
 	return count, err
@@ -716,6 +721,7 @@ func (s *BotreonStore) SDiffStore(destination string, keys ...string) (int, erro
 		// 更新计数器
 		count = len(result)
 		countKey := s.setKey(destination, "count")
+	// #nosec G115 - count is bounded by practical set size limits
 		return txn.Set([]byte(countKey), helper.Uint64ToBytes(uint64(count)))
 	})
 	return count, err

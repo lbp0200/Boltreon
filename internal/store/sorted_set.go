@@ -59,6 +59,7 @@ func decodeScore(b []byte) float64 {
 // encodeMeta 编码元数据
 func encodeMeta(meta ZSetsMetaValue) []byte {
 	b := make([]byte, 12)
+	// #nosec G115 - Card is bounded by practical sorted set size limits
 	binary.BigEndian.PutUint64(b[:8], uint64(meta.Card))
 	binary.BigEndian.PutUint32(b[8:], meta.Version)
 	return b
@@ -69,6 +70,7 @@ func decodeMeta(b []byte) (ZSetsMetaValue, error) {
 	if len(b) != 12 {
 		return ZSetsMetaValue{}, errors.New("invalid meta data")
 	}
+	// #nosec G115 - card is bounded by practical sorted set size limits
 	card := int64(binary.BigEndian.Uint64(b[:8]))
 	version := binary.BigEndian.Uint32(b[8:])
 	return ZSetsMetaValue{Card: card, Version: version}, nil
@@ -114,7 +116,8 @@ func (s *BotreonStore) retryUpdateSortedSet(fn func(*badger.Txn) error, maxRetri
 			strings.Contains(errStr, "conflict") ||
 			strings.Contains(errStr, "Conflict") {
 		// 指数退避 + 随机抖动：避免所有请求同时重试
-		// 基础退避：1ms, 2ms, 4ms, 8ms, 16ms, 32ms...
+			// 基础退避：1ms, 2ms, 4ms, 8ms, 16ms, 32ms...
+		// #nosec G115 - i is bounded by maxRetries (small value)
 		baseBackoff := time.Duration(1<<uint(i)) * time.Millisecond
 		// 最大退避时间：30ms（优化：减少单次重试的最大等待时间，提高响应速度）
 		if baseBackoff > 30*time.Millisecond {

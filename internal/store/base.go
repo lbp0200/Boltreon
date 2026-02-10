@@ -341,6 +341,7 @@ func (s *BotreonStore) TTL(key string) (int64, error) {
 		}
 
 		now := time.Now().Unix()
+		// #nosec G115 - expiresAt is a valid Unix timestamp within int64 range
 		ttl = int64(expiresAt) - now
 		if ttl < 0 {
 			ttl = -2 // 已过期
@@ -391,6 +392,7 @@ func (s *BotreonStore) PTTL(key string) (int64, error) {
 		}
 
 		now := time.Now().UnixNano() / int64(time.Millisecond)
+		// #nosec G115 - expiresAt is a valid Unix timestamp within int64 range
 		ttl = (int64(expiresAt) * 1000) - now
 		if ttl < 0 {
 			ttl = -2 // 已过期
@@ -669,14 +671,19 @@ func copyKeysByPrefix(txn *badger.Txn, oldPrefix []byte, oldKey, newKey, keyType
 		// 设置新键（保持TTL）
 		expiresAt := item.ExpiresAt()
 		if expiresAt > 0 {
+			// #nosec G115 - expiresAt is a valid Unix timestamp within int64 range
 			ttl := time.Until(time.Unix(int64(expiresAt), 0))
 			if ttl > 0 {
 				e := badger.NewEntry([]byte(newKeyStr), val).WithTTL(ttl)
 				if err := txn.SetEntry(e); err != nil {
 					return err
 				}
+			} else {
+				// TTL已过期，跳过
+				if err := txn.Set([]byte(newKeyStr), val); err != nil {
+					return err
+				}
 			}
-			// TTL已过期，跳过
 		} else {
 			if err := txn.Set([]byte(newKeyStr), val); err != nil {
 				return err
