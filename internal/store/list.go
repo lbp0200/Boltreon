@@ -539,6 +539,72 @@ func (s *BotreonStore) LSet(key string, index int64, value string) error {
 	})
 }
 
+// LPos 实现 Redis LPOS 命令，返回元素在列表中的索引
+// element: 要查找的元素
+// rank: 正数从头部开始，负数从尾部开始
+// count: 返回多个匹配位置，0 表示返回所有
+// maxlen: 最大扫描长度，0 表示扫描整个列表
+func (s *BotreonStore) LPos(key string, element string, rank, count, maxlen int64) ([]int64, error) {
+	var results []int64
+
+	err := s.db.View(func(txn *badger.Txn) error {
+		length, _, _, err := s.listGetMeta(key)
+		if err != nil {
+			return nil // 列表不存在，返回空
+		}
+		if length == 0 {
+			return nil
+		}
+
+		// 计算实际扫描长度
+		scanLen := int64(length)
+		if maxlen > 0 && maxlen < scanLen {
+			scanLen = maxlen
+		}
+
+		// 计算起始索引
+		startIdx := int64(0)
+		if rank < 0 {
+			// 从尾部开始，需要调整
+			// #nosec G115 - length is bounded by practical list size limits
+			startIdx = int64(length) + rank
+			if startIdx < 0 {
+				startIdx = 0
+			}
+		}
+
+		matches := int64(0)
+		found := int64(0)
+		for i := startIdx; i < scanLen; i++ {
+			_, val, err := s.getNodeByIndex(txn, key, i)
+			if err != nil {
+				continue
+			}
+			if val == element {
+				matches++
+				// 检查是否达到 rank
+				if rank > 0 && matches < rank {
+					continue
+				}
+				if rank < 0 && matches < -rank {
+					continue
+				}
+				found++
+				results = append(results, i)
+
+				// 如果只需要一个结果，或者达到了 count 限制
+				if (count == 0 && rank == 0) || (count > 0 && found >= count) {
+					break
+				}
+			}
+		}
+
+		return nil
+	})
+
+	return results, err
+}
+
 // LTRIM 实现 Redis LTRIM 命令
 func (s *BotreonStore) LTrim(key string, start, stop int64) error {
 	return s.db.Update(func(txn *badger.Txn) error {
@@ -1134,4 +1200,41 @@ func (s *BotreonStore) BRPOP(keys []string, timeout int) (string, string, error)
 func (s *BotreonStore) BRPOPLPUSH(source, destination string, timeout int) (string, error) {
 	// 简化实现：立即尝试执行RPOPLPUSH
 	return s.RPopLPush(source, destination)
+}
+
+// LMove 实现 Redis LMOVE 命令，原子性地从源列表弹出元素并推入目标列表
+// sourceDirection: "LEFT" 或 "RIGHT"
+// destinationDirection: "LEFT" 或 "RIGHT"
+func (s *BotreonStore) LMove(source, destination, sourceDirection, destinationDirection string) (string, error) {
+	var value string
+	var err error
+
+	switch sourceDirection {
+	case "LEFT":
+		value, err = s.LPop(source)
+	case "RIGHT":
+		value, err = s.RPop(source)
+	default:
+		return "", fmt.Errorf("ERR wrong source direction argument")
+	}
+
+	if err != nil || value == "" {
+		return "", err
+	}
+
+	switch destinationDirection {
+	case "LEFT":
+		_, err = s.LPush(destination, value)
+	case "RIGHT":
+		_, err = s.RPush(destination, value)
+	default:
+		return "", fmt.Errorf("ERR wrong destination direction argument")
+	}
+
+	return value, err
+}
+
+// BLMove 实现 Redis BLMOVE 命令，阻塞式LMOVE（简化版本：非阻塞）
+func (s *BotreonStore) BLMove(source, destination, sourceDirection, destinationDirection string, timeout float64) (string, error) {
+	return s.LMove(source, destination, sourceDirection, destinationDirection)
 }

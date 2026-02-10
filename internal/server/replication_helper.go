@@ -18,6 +18,11 @@ func isWriteCommand(cmd string) bool {
 		"SADD": true, "SREM": true, "SPOP": true, "SMOVE": true,
 		"SINTERSTORE": true, "SUNIONSTORE": true, "SDIFFSTORE": true,
 		"ZADD": true, "ZREM": true, "ZINCRBY": true,
+		// GEO commands
+		"GEOADD": true, "GEOSEARCHSTORE": true,
+		// Stream commands
+		"XADD": true, "XDEL": true, "XACK": true,
+		"XCLAIM": true, "XGROUP": true, "XTRIM": true,
 	}
 	return writeCommands[cmd]
 }

@@ -726,3 +726,63 @@ func (s *BotreonStore) SDiffStore(destination string, keys ...string) (int, erro
 	})
 	return count, err
 }
+
+// SMIsMember 实现 Redis SMISMEMBER 命令，检查多个成员是否在集合中
+func (s *BotreonStore) SMIsMember(key string, members ...string) ([]int64, error) {
+	results := make([]int64, len(members))
+	err := s.db.View(func(txn *badger.Txn) error {
+		for i, member := range members {
+			memberKey := s.setKey(key, "member", member)
+			_, err := txn.Get([]byte(memberKey))
+			if errors.Is(err, badger.ErrKeyNotFound) {
+				results[i] = 0
+			} else if err != nil {
+				return err
+			} else {
+				results[i] = 1
+			}
+		}
+		return nil
+	})
+	return results, err
+}
+
+// SInterCard 实现 Redis SINTERCARD 命令，返回多个集合的交集基数
+func (s *BotreonStore) SInterCard(keys ...string) (int64, error) {
+	var count int64
+	err := s.db.View(func(txn *badger.Txn) error {
+		if len(keys) == 0 {
+			return nil
+		}
+
+		// 获取第一个集合的所有成员
+		firstMembers, err := s.getAllMembers(txn, keys[0])
+		if err != nil {
+			return err
+		}
+		if len(firstMembers) == 0 {
+			return nil
+		}
+
+		// 统计在所有集合中都存在的成员
+		for _, member := range firstMembers {
+			inAll := true
+			for i := 1; i < len(keys); i++ {
+				memberKey := s.setKey(keys[i], "member", member)
+				_, err := txn.Get([]byte(memberKey))
+				if errors.Is(err, badger.ErrKeyNotFound) {
+					inAll = false
+					break
+				}
+				if err != nil {
+					return err
+				}
+			}
+			if inAll {
+				count++
+			}
+		}
+		return nil
+	})
+	return count, err
+}

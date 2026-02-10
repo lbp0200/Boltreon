@@ -3,17 +3,21 @@ package store
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/dgraph-io/badger/v4"
 )
 
-func (s *BotreonStore) Del(key string) error {
+// Del 删除键，返回删除的数量
+func (s *BotreonStore) Del(key string) (int64, error) {
 	typeKey := TypeOfKeyGet(key)
-	return s.db.Update(func(txn *badger.Txn) error {
+	var deleted int64
+
+	err := s.db.Update(func(txn *badger.Txn) error {
 		item, err := txn.Get(typeKey)
 		if errors.Is(err, badger.ErrKeyNotFound) {
-			return nil
+			return nil // 键不存在
 		}
 		if err != nil {
 			return err
@@ -23,7 +27,7 @@ func (s *BotreonStore) Del(key string) error {
 			return err
 		}
 		keyType := string(valCopy)
-		
+
 		// 清除读缓存
 		if s.readCache != nil {
 			s.readCache.Delete(key)
@@ -34,32 +38,47 @@ func (s *BotreonStore) Del(key string) error {
 			if err := txn.Delete(typeKey); err != nil {
 				return err
 			}
-			return txn.Delete([]byte(s.stringKey(key)))
+			if err := txn.Delete([]byte(s.stringKey(key))); err != nil {
+				return err
+			}
 		case KeyTypeList:
 			if err := deleteByPrefix(txn, []byte(fmt.Sprintf("%s:%s:", KeyTypeList, key))); err != nil {
 				return err
 			}
-			return txn.Delete(typeKey)
+			if err := txn.Delete(typeKey); err != nil {
+				return err
+			}
 		case KeyTypeHash:
 			if err := deleteByPrefix(txn, []byte(fmt.Sprintf("%s:%s:", KeyTypeHash, key))); err != nil {
 				return err
 			}
-			return txn.Delete(typeKey)
+			if err := txn.Delete(typeKey); err != nil {
+				return err
+			}
 		case KeyTypeSet:
 			if err := deleteByPrefix(txn, []byte(fmt.Sprintf("%s:%s:", KeyTypeSet, key))); err != nil {
 				return err
 			}
-			return txn.Delete(typeKey)
+			if err := txn.Delete(typeKey); err != nil {
+				return err
+			}
 		case KeyTypeSortedSet:
-			// SortedSet的键格式是: zset:key:meta, zset:key:data:member, zset:key:index:...
 			if err := deleteByPrefix(txn, []byte(fmt.Sprintf("%s%s:", prefixKeySortedSetBytes, key))); err != nil {
 				return err
 			}
-			return txn.Delete(typeKey)
+			if err := txn.Delete(typeKey); err != nil {
+				return err
+			}
 		default:
-			return txn.Delete(typeKey)
+			if err := txn.Delete(typeKey); err != nil {
+				return err
+			}
 		}
+		deleted = 1
+		return nil
 	})
+
+	return deleted, err
 }
 
 func (s *BotreonStore) DelString(key string) error {
@@ -196,7 +215,7 @@ func (s *BotreonStore) Expire(key string, seconds int) (bool, error) {
 		}
 		keyType := string(val)
 
-		// 获取值键并设置TTL
+		// 获取值键
 		valueKey, err := s.getKeyValueKey(key, keyType)
 		if err != nil {
 			return err
@@ -216,8 +235,10 @@ func (s *BotreonStore) Expire(key string, seconds int) (bool, error) {
 			return err
 		}
 
-		// 设置新TTL
-		e := badger.NewEntry(valueKey, valBytes).WithTTL(time.Duration(seconds) * time.Second)
+		// 直接设置TTL：计算过期时间戳（纳秒）
+		expiresAt := uint64(time.Now().UnixNano()) + uint64(seconds)*uint64(time.Second)
+		e := badger.NewEntry(valueKey, valBytes)
+		e.ExpiresAt = expiresAt
 		if err := txn.SetEntry(e); err != nil {
 			return err
 		}
@@ -234,7 +255,8 @@ func (s *BotreonStore) ExpireAt(key string, timestamp int64) (bool, error) {
 	ttl := timestamp - now
 	if ttl <= 0 {
 		// 时间戳已过期，删除键
-		return false, s.Del(key)
+		_, _ = s.Del(key)
+		return false, nil
 	}
 	return s.Expire(key, int(ttl))
 }
@@ -257,7 +279,7 @@ func (s *BotreonStore) PExpire(key string, milliseconds int64) (bool, error) {
 		}
 		keyType := string(val)
 
-		// 获取值键并设置TTL
+		// 获取值键
 		valueKey, err := s.getKeyValueKey(key, keyType)
 		if err != nil {
 			return err
@@ -277,8 +299,10 @@ func (s *BotreonStore) PExpire(key string, milliseconds int64) (bool, error) {
 			return err
 		}
 
-		// 设置新TTL
-		e := badger.NewEntry(valueKey, valBytes).WithTTL(time.Duration(milliseconds) * time.Millisecond)
+		// 直接设置TTL：计算过期时间戳（纳秒）
+		expiresAt := uint64(time.Now().UnixNano()) + uint64(milliseconds)*uint64(time.Millisecond)
+		e := badger.NewEntry(valueKey, valBytes)
+		e.ExpiresAt = expiresAt
 		if err := txn.SetEntry(e); err != nil {
 			return err
 		}
@@ -295,7 +319,8 @@ func (s *BotreonStore) PExpireAt(key string, timestampMillis int64) (bool, error
 	ttl := timestampMillis - now
 	if ttl <= 0 {
 		// 时间戳已过期，删除键
-		return false, s.Del(key)
+		_, _ = s.Del(key)
+		return false, nil
 	}
 	return s.PExpire(key, ttl)
 }
@@ -334,15 +359,16 @@ func (s *BotreonStore) TTL(key string) (int64, error) {
 			return err
 		}
 
+		// ExpiresAt 返回的是 Unix 纳秒时间戳 (uint64)
 		expiresAt := valueItem.ExpiresAt()
 		if expiresAt == 0 {
 			ttl = -1 // -1表示键存在但没有设置过期时间
 			return nil
 		}
 
-		now := time.Now().Unix()
 		// #nosec G115 - expiresAt is a valid Unix timestamp within int64 range
-		ttl = int64(expiresAt) - now
+		nowNano := time.Now().UnixNano()
+		ttl = int64(expiresAt-uint64(nowNano)) / int64(time.Second)
 		if ttl < 0 {
 			ttl = -2 // 已过期
 		}
@@ -385,15 +411,16 @@ func (s *BotreonStore) PTTL(key string) (int64, error) {
 			return err
 		}
 
+		// ExpiresAt 返回的是 Unix 纳秒时间戳 (uint64)
 		expiresAt := valueItem.ExpiresAt()
 		if expiresAt == 0 {
 			ttl = -1 // -1表示键存在但没有设置过期时间
 			return nil
 		}
 
-		now := time.Now().UnixNano() / int64(time.Millisecond)
 		// #nosec G115 - expiresAt is a valid Unix timestamp within int64 range
-		ttl = (int64(expiresAt) * 1000) - now
+		nowNano := time.Now().UnixNano()
+		ttl = int64(expiresAt-uint64(nowNano)) / int64(time.Millisecond)
 		if ttl < 0 {
 			ttl = -2 // 已过期
 		}
@@ -896,4 +923,261 @@ func (s *BotreonStore) RandomKey() (string, error) {
 		return nil
 	})
 	return key, err
+}
+
+// ObjectRefCount 实现 Redis OBJECT REFCOUNT 命令，返回键的引用计数
+func (s *BotreonStore) ObjectRefCount(key string) (int64, error) {
+	typeKey := TypeOfKeyGet(key)
+	var refcount int64
+
+	err := s.db.View(func(txn *badger.Txn) error {
+		_, err := txn.Get(typeKey)
+		if errors.Is(err, badger.ErrKeyNotFound) {
+			return nil // 键不存在，返回 nil
+		}
+		if err != nil {
+			return err
+		}
+		refcount = 1 // 我们总是返回1，因为每个键只存储一次
+		return nil
+	})
+
+	if errors.Is(err, badger.ErrKeyNotFound) {
+		return 0, nil
+	}
+	return refcount, err
+}
+
+// ObjectEncoding 实现 Redis OBJECT ENCODING 命令，返回键的内部编码
+func (s *BotreonStore) ObjectEncoding(key string) (string, error) {
+	typeKey := TypeOfKeyGet(key)
+
+	var keyType string
+	err := s.db.View(func(txn *badger.Txn) error {
+		item, err := txn.Get(typeKey)
+		if errors.Is(err, badger.ErrKeyNotFound) {
+			return nil // 键不存在
+		}
+		if err != nil {
+			return err
+		}
+		valCopy, err := item.ValueCopy(nil)
+		if err != nil {
+			return err
+		}
+		keyType = string(valCopy)
+		return nil
+	})
+
+	if errors.Is(err, badger.ErrKeyNotFound) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+
+	// 返回对应类型的编码
+	switch keyType {
+	case KeyTypeString:
+		return "raw", nil // 简单字符串使用 raw 编码
+	case KeyTypeList:
+		return "quicklist", nil // 列表使用 quicklist 编码
+	case KeyTypeHash:
+		return "hashtable", nil // 哈希表使用 hashtable 编码
+	case KeyTypeSet:
+		return "hashtable", nil // 集合使用 hashtable 编码
+	case "zset":
+		return "ziplist", nil // 有序集合（如果小）使用 ziplist，否则 skiplist
+	default:
+		return "", nil
+	}
+}
+
+// ObjectIdleTime 实现 Redis OBJECT IDLETIME 命令，返回键的空闲时间（秒）
+// 注意：由于 BadgerDB 不直接支持 LRU 追踪，我们返回 0
+func (s *BotreonStore) ObjectIdleTime(key string) (int64, error) {
+	// BadgerDB 不维护访问时间信息，返回 0
+	// 如果需要精确实现，需要额外维护访问时间戳
+	return 0, nil
+}
+
+// Dump 实现 Redis DUMP 命令，序列化键值
+func (s *BotreonStore) Dump(key string) ([]byte, error) {
+	var result []byte
+	err := s.db.View(func(txn *badger.Txn) error {
+		// 获取键类型
+		typeKey := TypeOfKeyGet(key)
+		item, err := txn.Get(typeKey)
+		if errors.Is(err, badger.ErrKeyNotFound) {
+			return nil // 键不存在
+		}
+		if err != nil {
+			return err
+		}
+		valCopy, _ := item.ValueCopy(nil)
+		keyType := string(valCopy)
+
+		// 序列化格式：TYPE + VALUE
+		// 使用简单的格式：type:data
+		switch keyType {
+		case KeyTypeString:
+			// 获取字符串值
+			strKey := s.stringKey(key)
+			valItem, err := txn.Get([]byte(strKey))
+			if err != nil {
+				return err
+			}
+			val, _ := valItem.ValueCopy(nil)
+			result = append([]byte("string:"), val...)
+		case KeyTypeList:
+			// 获取列表所有元素
+			result = append(result, []byte("list:")...)
+			listData, err := s.getListData(key)
+			if err != nil {
+				return err
+			}
+			for i, elem := range listData {
+				if i > 0 {
+					result = append(result, ',')
+				}
+				result = append(result, []byte(elem)...)
+			}
+		case KeyTypeHash:
+			// 获取哈希所有字段
+			result = append(result, []byte("hash:")...)
+			fields, err := s.getAllHashFields(txn, key)
+			if err != nil {
+				return err
+			}
+			for i, field := range fields {
+				if i > 0 {
+					result = append(result, ',')
+				}
+				result = append(result, []byte(field+"=")...)
+				valItem, err := txn.Get([]byte(fmt.Sprintf("%s:%s:%s", KeyTypeHash, key, field)))
+				if err != nil {
+					return err
+				}
+				val, _ := valItem.ValueCopy(nil)
+				result = append(result, val...)
+			}
+		case KeyTypeSet:
+			// 获取集合所有成员
+			result = append(result, []byte("set:")...)
+			members, err := s.SMembers(key)
+			if err != nil {
+				return err
+			}
+			for i, member := range members {
+				if i > 0 {
+					result = append(result, ',')
+				}
+				result = append(result, []byte(member)...)
+			}
+		default:
+			// 对于有序集合等复杂类型，返回空
+			result = []byte(keyType + ":")
+		}
+		return nil
+	})
+	return result, err
+}
+
+// Restore 实现 Redis RESTORE 命令，反序列化键值
+func (s *BotreonStore) Restore(key string, serializedData []byte, replace bool) error {
+	// 解析序列化数据
+	dataStr := string(serializedData)
+	colonIndex := strings.Index(dataStr, ":")
+	if colonIndex == -1 {
+		return fmt.Errorf("invalid serialized data")
+	}
+
+	keyType := dataStr[:colonIndex]
+	data := dataStr[colonIndex+1:]
+
+	// 检查键是否已存在
+	exists, err := s.Exists(key)
+	if err != nil {
+		return err
+	}
+	if exists && !replace {
+		return fmt.Errorf("ERR target key already exists")
+	}
+
+	// 删除已存在的键
+	if exists {
+		_, _ = s.Del(key)
+	}
+
+	switch keyType {
+	case "string":
+		return s.Set(key, data)
+	case "list":
+		// 分割列表元素
+		if data != "" {
+			elems := strings.Split(data, ",")
+			_, err = s.LPush(key, elems...)
+			return err
+		}
+		return nil
+	case "hash":
+		// 分割字段
+		if data != "" {
+			fields := strings.Split(data, ",")
+			for _, field := range fields {
+				eqIndex := strings.Index(field, "=")
+				if eqIndex == -1 {
+					continue
+				}
+				fieldName := field[:eqIndex]
+				fieldValue := field[eqIndex+1:]
+				if err := s.HSet(key, fieldName, fieldValue); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	case "set":
+		// 分割成员
+		if data != "" {
+			members := strings.Split(data, ",")
+			for _, member := range members {
+				if _, err := s.SAdd(key, member); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	default:
+		return fmt.Errorf("unsupported key type: %s", keyType)
+	}
+}
+
+// getListData 获取列表的所有数据（用于 DUMP）
+func (s *BotreonStore) getListData(key string) ([]string, error) {
+	length, err := s.LLen(key)
+	if err != nil {
+		return nil, err
+	}
+	if length == 0 {
+		return []string{}, nil
+	}
+
+	var elements []string
+	for i := uint64(0); i < length; i++ {
+		val, err := s.LIndex(key, int64(i))
+		if err != nil {
+			return nil, err
+		}
+		elements = append(elements, val)
+	}
+	return elements, nil
+}
+
+// Time 实现 Redis TIME 命令，返回服务器当前时间
+func (s *BotreonStore) Time() (int64, int64, error) {
+	now := time.Now()
+	sec := now.Unix()
+	usec := int64(now.Nanosecond() / 1000)
+	return sec, usec, nil
 }

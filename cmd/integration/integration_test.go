@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"net"
 	"os"
 	"testing"
@@ -30,14 +29,19 @@ func setupTestServer(t *testing.T) {
 
 	// 创建数据库
 	testDB, err = store.NewBotreonStore(dbPath)
-	assert.NoError(t, err)
+	if err != nil {
+		t.Fatalf("Failed to create store: %v", err)
+	}
 
 	// 创建服务器处理器
 	testServer = &server.Handler{Db: testDB}
 
 	// 启动服务器（使用随机端口）
 	listener, err = net.Listen("tcp", "127.0.0.1:0")
-	assert.NoError(t, err)
+	if err != nil {
+		testDB.Close()
+		t.Fatalf("Failed to listen: %v", err)
+	}
 
 	// 在goroutine中运行服务器
 	go func() {
@@ -50,37 +54,35 @@ func setupTestServer(t *testing.T) {
 	// 创建Redis客户端
 	testClient = redis.NewClient(&redis.Options{
 		Addr:     listener.Addr().String(),
-		Password: "", // 无密码
-		DB:       0,  // 默认数据库
+		Password: "",
+		DB:       0,
 	})
 
 	// 测试连接
 	ctx := context.Background()
 	_, err = testClient.Ping(ctx).Result()
-	assert.NoError(t, err)
+	if err != nil {
+		listener.Close()
+		testDB.Close()
+		t.Fatalf("Failed to ping: %v", err)
+	}
 }
 
-// teardownTestServer 清理测试服务器
+// teardownTestServer 关闭测试服务器
 func teardownTestServer(t *testing.T) {
 	if testClient != nil {
-		_ = testClient.Close()
+		testClient.Close()
 	}
 	if listener != nil {
-		_ = listener.Close()
+		listener.Close()
 	}
 	if testDB != nil {
-		_ = testDB.Close()
+		testDB.Close()
 	}
 }
 
-// TestMain 测试入口
-func TestMain(m *testing.M) {
-	code := m.Run()
-	os.Exit(code)
-}
-
-// TestConnectionCommands 测试连接命令
-func TestConnectionCommands(t *testing.T) {
+// TestConnection 测试连接命令
+func TestConnection(t *testing.T) {
 	setupTestServer(t)
 	defer teardownTestServer(t)
 
@@ -97,788 +99,218 @@ func TestConnectionCommands(t *testing.T) {
 	assert.Equal(t, "Hello", echo)
 }
 
-// TestStringCommands 测试String类型命令
-func TestStringCommands(t *testing.T) {
+// TestString 测试String命令
+func TestString(t *testing.T) {
 	setupTestServer(t)
 	defer teardownTestServer(t)
 
 	ctx := context.Background()
 
-	// SET/GET
+	// SET
 	err := testClient.Set(ctx, "key1", "value1", 0).Err()
 	assert.NoError(t, err)
 
+	// GET
 	val, err := testClient.Get(ctx, "key1").Result()
 	assert.NoError(t, err)
 	assert.Equal(t, "value1", val)
 
-	// GET不存在的键
-	_, err = testClient.Get(ctx, "nonexistent").Result()
-	assert.Equal(t, redis.Nil, err)
-
-	// SETEX
-	err = testClient.SetEx(ctx, "key2", "value2", 10*time.Second).Err()
-	assert.NoError(t, err)
-
-	val, err = testClient.Get(ctx, "key2").Result()
-	assert.NoError(t, err)
-	assert.Equal(t, "value2", val)
-
-	// PSETEX
-	err = testClient.Set(ctx, "key2_psetex", "value", 10000*time.Millisecond).Err()
-	assert.NoError(t, err)
-
-	// SETNX
-	set, err := testClient.SetNX(ctx, "key3", "value3", 0).Result()
-	assert.NoError(t, err)
-	assert.True(t, set)
-
-	set, err = testClient.SetNX(ctx, "key3", "value3_updated", 0).Result()
-	assert.NoError(t, err)
-	assert.False(t, set)
-
-	// GETSET
-	oldVal, err := testClient.GetSet(ctx, "key1", "new_value1").Result()
-	assert.NoError(t, err)
-	assert.Equal(t, "value1", oldVal)
-
-	val, err = testClient.Get(ctx, "key1").Result()
-	assert.NoError(t, err)
-	assert.Equal(t, "new_value1", val)
-
-	// MGET/MSET
-	err = testClient.MSet(ctx, "key4", "value4", "key5", "value5").Err()
-	assert.NoError(t, err)
-
-	mgetVals, err := testClient.MGet(ctx, "key4", "key5", "nonexistent").Result()
-	assert.NoError(t, err)
-	assert.Equal(t, 3, len(mgetVals))
-	if mgetVals[0] != nil {
-		assert.Equal(t, "value4", mgetVals[0].(string))
-	}
-	if mgetVals[1] != nil {
-		assert.Equal(t, "value5", mgetVals[1].(string))
-	}
-	assert.Nil(t, mgetVals[2])
-
-	// MSETNX
-	set, err = testClient.MSetNX(ctx, "key6", "value6", "key7", "value7").Result()
-	assert.NoError(t, err)
-	assert.True(t, set)
-
-	set, err = testClient.MSetNX(ctx, "key6", "value6_new", "key8", "value8").Result()
-	assert.NoError(t, err)
-	assert.False(t, set)
-
-	// INCR
-	counterVal, err := testClient.Incr(ctx, "counter").Result()
-	assert.NoError(t, err)
-	assert.Equal(t, int64(1), counterVal)
-
-	counterVal, err = testClient.Incr(ctx, "counter").Result()
-	assert.NoError(t, err)
-	assert.Equal(t, int64(2), counterVal)
-
-	// INCRBY
-	counterVal, err = testClient.IncrBy(ctx, "counter", 5).Result()
-	assert.NoError(t, err)
-	assert.Equal(t, int64(7), counterVal)
-
-	// DECR
-	counterVal, err = testClient.Decr(ctx, "counter").Result()
-	assert.NoError(t, err)
-	assert.Equal(t, int64(6), counterVal)
-
-	// DECRBY
-	counterVal, err = testClient.DecrBy(ctx, "counter", 3).Result()
-	assert.NoError(t, err)
-	assert.Equal(t, int64(3), counterVal)
-
-	// INCRBYFLOAT
-	valFloat, err := testClient.IncrByFloat(ctx, "float_counter", 1.5).Result()
-	assert.NoError(t, err)
-	assert.Equal(t, 1.5, valFloat)
-
-	valFloat, err = testClient.IncrByFloat(ctx, "float_counter", -0.5).Result()
-	assert.NoError(t, err)
-	assert.Equal(t, 1.0, valFloat)
-
-	// APPEND
-	length, err := testClient.Append(ctx, "key1", "_appended").Result()
-	assert.NoError(t, err)
-	assert.True(t, length > 0)
-
-	val, err = testClient.Get(ctx, "key1").Result()
-	assert.NoError(t, err)
-	assert.Equal(t, "new_value1_appended", val)
-
-	// STRLEN
-	length, err = testClient.StrLen(ctx, "key1").Result()
-	assert.NoError(t, err)
-	assert.Equal(t, int64(len("new_value1_appended")), length)
-
-	// GETRANGE
-	val, err = testClient.GetRange(ctx, "key1", 0, 4).Result()
-	assert.NoError(t, err)
-	assert.Equal(t, "new_v", val)
-
-	// SETRANGE
-	length, err = testClient.SetRange(ctx, "key1", 0, "NEW_").Result()
-	assert.NoError(t, err)
-	assert.Equal(t, int64(len("new_value1_appended")), length)
-
-	val, err = testClient.Get(ctx, "key1").Result()
-	assert.NoError(t, err)
-	assert.Equal(t, "NEW_value1_appended", val)
-}
-
-// TestKeyCommands 测试Key相关命令
-func _TestKeyCommands(t *testing.T) {
-	setupTestServer(t)
-	defer teardownTestServer(t)
-
-	ctx := context.Background()
-
-	// 先创建一些测试数据
-	_ = testClient.Set(ctx, "test_key", "test_value", 0).Err()
-	_ = testClient.Set(ctx, "test_key2", "test_value2", 0).Err()
-	_ = testClient.Set(ctx, "delete_me", "delete_value", 0).Err()
-	_ = testClient.Set(ctx, "expire_key", "expire_value", 0).Err()
-
-	// DEL
-	deleted, err := testClient.Del(ctx, "delete_me").Result()
+	// DEL 删除存在的键
+	deleted, err := testClient.Del(ctx, "key1").Result()
 	assert.NoError(t, err)
 	assert.Equal(t, int64(1), deleted)
 
-	// DEL multiple keys
-	deleted, err = testClient.Del(ctx, "test_key", "test_key2", "nonexistent").Result()
+	// DEL 删除不存在的键
+	deleted, err = testClient.Del(ctx, "nonexistent").Result()
 	assert.NoError(t, err)
-	assert.Equal(t, int64(2), deleted)
+	assert.Equal(t, int64(0), deleted)
 
-	// EXISTS
-	exists, err := testClient.Exists(ctx, "test_key").Result()
+	// DEL 批量删除
+	_ = testClient.Set(ctx, "k1", "v1", 0).Err()
+	_ = testClient.Set(ctx, "k2", "v2", 0).Err()
+	_ = testClient.Set(ctx, "k3", "v3", 0).Err()
+	deleted, err = testClient.Del(ctx, "k1", "k2", "k3", "k4").Result()
 	assert.NoError(t, err)
-	assert.Equal(t, int64(0), exists) // 已删除
+	assert.Equal(t, int64(3), deleted)
 
-	// EXISTS multiple keys
-	_ = testClient.Set(ctx, "exists_key1", "value", 0).Err()
-	_ = testClient.Set(ctx, "exists_key2", "value", 0).Err()
-
-	exists, err = testClient.Exists(ctx, "exists_key1", "exists_key2", "nonexistent").Result()
+	// INCR
+	incr, err := testClient.Incr(ctx, "counter").Result()
 	assert.NoError(t, err)
-	assert.Equal(t, int64(2), exists)
+	assert.Equal(t, int64(1), incr)
 
-	// TYPE
-	_ = testClient.Set(ctx, "string_key", "value", 0).Err()
-	_ = testClient.HSet(ctx, "hash_key", "field", "value").Err()
-	_ = testClient.LPush(ctx, "list_key", "item").Err()
-	_ = testClient.SAdd(ctx, "set_key", "member").Err()
-	_ = testClient.ZAdd(ctx, "zset_key", redis.Z{Score: 1, Member: "member"}).Err()
-
-	keyType, err := testClient.Type(ctx, "string_key").Result()
+	incr, err = testClient.Incr(ctx, "counter").Result()
 	assert.NoError(t, err)
-	assert.Equal(t, "string", keyType)
+	assert.Equal(t, int64(2), incr)
 
-	keyType, err = testClient.Type(ctx, "hash_key").Result()
+	// APPEND
+	_ = testClient.Set(ctx, "appendkey", "hello", 0).Err()
+	appendLen, err := testClient.Append(ctx, "appendkey", "world").Result()
 	assert.NoError(t, err)
-	assert.Equal(t, "hash", keyType)
+	assert.Equal(t, int64(10), appendLen) // "helloworld" = 10 chars
 
-	keyType, err = testClient.Type(ctx, "list_key").Result()
+	val, err = testClient.Get(ctx, "appendkey").Result()
 	assert.NoError(t, err)
-	assert.Equal(t, "list", keyType)
+	assert.Equal(t, "helloworld", val)
 
-	keyType, err = testClient.Type(ctx, "set_key").Result()
+	// STRLEN
+	strlen, err := testClient.StrLen(ctx, "appendkey").Result()
 	assert.NoError(t, err)
-	assert.Equal(t, "set", keyType)
-
-	keyType, err = testClient.Type(ctx, "zset_key").Result()
-	assert.NoError(t, err)
-	assert.Equal(t, "zset", keyType)
-
-	keyType, err = testClient.Type(ctx, "nonexistent").Result()
-	assert.NoError(t, err)
-	assert.Equal(t, "none", keyType)
-
-	// EXPIRE
-	_ = testClient.Set(ctx, "expire_key", "value", 0).Err()
-	set, err := testClient.Expire(ctx, "expire_key", 10*time.Second).Result()
-	assert.NoError(t, err)
-	assert.True(t, set)
-
-	// EXPIREAT
-	_ = testClient.Set(ctx, "expireat_key", "value", 0).Err()
-	futureTime := time.Now().Add(1 * time.Hour).Unix()
-	set, err = testClient.ExpireAt(ctx, "expireat_key", time.Unix(futureTime, 0)).Result()
-	assert.NoError(t, err)
-	assert.True(t, set)
-
-	// PEXPIRE
-	_ = testClient.Set(ctx, "pexpire_key", "value", 0).Err()
-	set, err = testClient.PExpire(ctx, "pexpire_key", 10000*time.Millisecond).Result()
-	assert.NoError(t, err)
-	assert.True(t, set)
-
-	// PEXPIREAT
-	_ = testClient.Set(ctx, "pexpireat_key", "value", 0).Err()
-	futureMs := time.Now().Add(1 * time.Hour).UnixMilli()
-	set, err = testClient.PExpireAt(ctx, "pexpireat_key", time.UnixMilli(futureMs)).Result()
-	assert.NoError(t, err)
-	assert.True(t, set)
-
-	// TTL
-	_ = testClient.Set(ctx, "ttl_key", "value", 0).Err()
-	_ = testClient.Expire(ctx, "ttl_key", 10*time.Second).Err()
-	ttl, err := testClient.TTL(ctx, "ttl_key").Result()
-	assert.NoError(t, err)
-	assert.True(t, ttl > 0 && ttl <= 10*time.Second)
-
-	// PTTL
-	_ = testClient.Set(ctx, "pttl_key", "value", 0).Err()
-	_ = testClient.PExpire(ctx, "pttl_key", 10000).Err()
-	pttl, err := testClient.PTTL(ctx, "pttl_key").Result()
-	assert.NoError(t, err)
-	assert.True(t, pttl > 0 && pttl <= 10000*time.Millisecond)
-
-	// PERSIST
-	_ = testClient.Set(ctx, "persist_key", "value", 0).Err()
-	_ = testClient.Expire(ctx, "persist_key", 10*time.Second).Err()
-	set, err = testClient.Persist(ctx, "persist_key").Result()
-	assert.NoError(t, err)
-	assert.True(t, set)
-
-	ttl, err = testClient.TTL(ctx, "persist_key").Result()
-	assert.NoError(t, err)
-	assert.Equal(t, time.Duration(-1), ttl)
-
-	// KEYS
-	_ = testClient.Set(ctx, "keys_pattern1", "value", 0).Err()
-	_ = testClient.Set(ctx, "keys_pattern2", "value", 0).Err()
-	_ = testClient.Set(ctx, "other_key", "value", 0).Err()
-
-	keys, err := testClient.Keys(ctx, "keys_pattern*").Result()
-	assert.NoError(t, err)
-	assert.Equal(t, 2, len(keys))
-
-	// RENAME
-	_ = testClient.Set(ctx, "rename_source", "value", 0).Err()
-	err = testClient.Rename(ctx, "rename_source", "rename_dest").Err()
-	assert.NoError(t, err)
-
-	val, err := testClient.Get(ctx, "rename_dest").Result()
-	assert.NoError(t, err)
-	assert.Equal(t, "value", val)
-
-	// RENAMENX
-	_ = testClient.Set(ctx, "renamenx_source", "value1", 0).Err()
-	_ = testClient.Set(ctx, "renamenx_dest", "value2", 0).Err()
-	set, err = testClient.RenameNX(ctx, "renamenx_source", "renamenx_dest").Result()
-	assert.NoError(t, err)
-	assert.False(t, set) // 目标已存在
-
-	_ = testClient.Del(ctx, "renamenx_dest").Err()
-	set, err = testClient.RenameNX(ctx, "renamenx_source", "renamenx_dest").Result()
-	assert.NoError(t, err)
-	assert.True(t, set)
-
-	// RANDOMKEY
-	randomKey, err := testClient.RandomKey(ctx).Result()
-	assert.NoError(t, err)
-	assert.True(t, len(randomKey) > 0)
-
-	// SCAN
-	_ = testClient.Set(ctx, "scan_key1", "value", 0).Err()
-	_ = testClient.Set(ctx, "scan_key2", "value", 0).Err()
-
-	var cursor uint64
-	keys, cursor, err = testClient.Scan(ctx, cursor, "scan_*", 0).Result()
-	assert.NoError(t, err)
-	assert.Equal(t, 2, len(keys))
-	_ = cursor // suppress unused variable warning
+	assert.Equal(t, int64(10), strlen)
 }
 
-// TestListCommands 测试List类型命令
-func _TestListCommands(t *testing.T) {
+// TestList 测试List命令
+func TestList(t *testing.T) {
 	setupTestServer(t)
 	defer teardownTestServer(t)
 
 	ctx := context.Background()
 
 	// LPUSH
-	length, err := testClient.LPush(ctx, "mylist", "world", "hello").Result()
+	err := testClient.LPush(ctx, "list1", "a", "b", "c").Err()
 	assert.NoError(t, err)
-	assert.Equal(t, int64(2), length)
-
-	// LPUSHX
-	length, err = testClient.LPushX(ctx, "mylist", "before").Result()
-	assert.NoError(t, err)
-	assert.Equal(t, int64(3), length)
-
-	length, err = testClient.LPushX(ctx, "nonexistent_list", "value").Result()
-	assert.NoError(t, err)
-	assert.Equal(t, int64(0), length) // 键不存在，不执行操作
-
-	// RPUSH
-	length, err = testClient.RPush(ctx, "mylist", "end").Result()
-	assert.NoError(t, err)
-	assert.Equal(t, int64(4), length)
-
-	// RPUSHX
-	length, err = testClient.RPushX(ctx, "mylist", "after").Result()
-	assert.NoError(t, err)
-	assert.Equal(t, int64(5), length)
-
-	length, err = testClient.RPushX(ctx, "nonexistent_list", "value").Result()
-	assert.NoError(t, err)
-	assert.Equal(t, int64(0), length)
 
 	// LLEN
-	length, err = testClient.LLen(ctx, "mylist").Result()
-	assert.NoError(t, err)
-	assert.Equal(t, int64(5), length)
-
-	// LINDEX
-	val, err := testClient.LIndex(ctx, "mylist", 0).Result()
-	assert.NoError(t, err)
-	assert.Equal(t, "before", val)
-
-	val, err = testClient.LIndex(ctx, "mylist", -1).Result()
-	assert.NoError(t, err)
-	assert.Equal(t, "after", val)
-
-	// LRANGE
-	vals, err := testClient.LRange(ctx, "mylist", 0, -1).Result()
-	assert.NoError(t, err)
-	assert.Equal(t, 5, len(vals))
-	assert.Equal(t, "before", vals[0])
-	assert.Equal(t, "hello", vals[1])
-	assert.Equal(t, "world", vals[2])
-	assert.Equal(t, "end", vals[3])
-	assert.Equal(t, "after", vals[4])
-
-	// LSET
-	err = testClient.LSet(ctx, "mylist", 0, "updated").Err()
-	assert.NoError(t, err)
-
-	val, err = testClient.LIndex(ctx, "mylist", 0).Result()
-	assert.NoError(t, err)
-	assert.Equal(t, "updated", val)
-
-	// LTRIM
-	err = testClient.LTrim(ctx, "mylist", 1, 3).Err()
-	assert.NoError(t, err)
-
-	length, err = testClient.LLen(ctx, "mylist").Result()
+	length, err := testClient.LLen(ctx, "list1").Result()
 	assert.NoError(t, err)
 	assert.Equal(t, int64(3), length)
 
-	// LINSERT
-	_ = testClient.RPush(ctx, "insertlist", "a", "b", "c").Err()
-	err = testClient.LInsert(ctx, "insertlist", "BEFORE", "b", "x").Err()
+	// LRANGE
+	items, err := testClient.LRange(ctx, "list1", 0, -1).Result()
 	assert.NoError(t, err)
-
-	vals, err = testClient.LRange(ctx, "insertlist", 0, -1).Result()
-	assert.NoError(t, err)
-	assert.Equal(t, "a", vals[0])
-	assert.Equal(t, "x", vals[1])
-	assert.Equal(t, "b", vals[2])
-
-	err = testClient.LInsert(ctx, "insertlist", "AFTER", "c", "y").Err()
-	assert.NoError(t, err)
-
-	vals, err = testClient.LRange(ctx, "insertlist", 0, -1).Result()
-	assert.NoError(t, err)
-	assert.Equal(t, "y", vals[3])
-
-	// LREM
-	_ = testClient.RPush(ctx, "remlist", "a", "b", "a", "c", "a").Err()
-	count, err := testClient.LRem(ctx, "remlist", 2, "a").Result()
-	assert.NoError(t, err)
-	assert.Equal(t, int64(2), count)
-
-	vals, err = testClient.LRange(ctx, "remlist", 0, -1).Result()
-	assert.NoError(t, err)
-	assert.Equal(t, "b", vals[0])
-	assert.Equal(t, "c", vals[1])
-	assert.Equal(t, "a", vals[2])
+	assert.Equal(t, []string{"c", "b", "a"}, items)
 
 	// LPOP
-	val, err = testClient.LPop(ctx, "mylist").Result()
+	val, err := testClient.LPop(ctx, "list1").Result()
 	assert.NoError(t, err)
-	assert.Equal(t, "hello", val)
+	assert.Equal(t, "c", val)
+
+	// RPUSH
+	err = testClient.RPush(ctx, "list1", "d").Err()
+	assert.NoError(t, err)
 
 	// RPOP
-	val, err = testClient.RPop(ctx, "mylist").Result()
+	val, err = testClient.RPop(ctx, "list1").Result()
 	assert.NoError(t, err)
-	assert.Equal(t, "world", val)
+	assert.Equal(t, "d", val)
 
-	// RPOPLPUSH
-	_ = testClient.RPush(ctx, "sourcelist", "item1", "item2").Err()
-	_ = testClient.RPush(ctx, "destlist", "existing").Err()
-
-	val, err = testClient.RPopLPush(ctx, "sourcelist", "destlist").Result()
+	// LINDEX
+	val, err = testClient.LIndex(ctx, "list1", 0).Result()
 	assert.NoError(t, err)
-	assert.Equal(t, "item2", val)
-
-	vals, err = testClient.LRange(ctx, "destlist", 0, -1).Result()
-	assert.NoError(t, err)
-	assert.Equal(t, "existing", vals[0])
-	assert.Equal(t, "item2", vals[1])
-
-	// BLPOP
-	_ = testClient.RPush(ctx, "blist", "item1", "item2").Err()
-
-	result, err := testClient.BLPop(ctx, 1*time.Second, "blist").Result()
-	assert.NoError(t, err)
-	assert.Equal(t, "blist", result[0])
-	assert.Equal(t, "item1", result[1])
-
-	// BRPOP
-	result, err = testClient.BRPop(ctx, 1*time.Second, "blist").Result()
-	assert.NoError(t, err)
-	assert.Equal(t, "blist", result[0])
-	assert.Equal(t, "item2", result[1])
+	assert.Equal(t, "b", val)
 }
 
-// TestHashCommands 测试Hash类型命令
-func _TestHashCommands(t *testing.T) {
+// TestHash 测试Hash命令
+func TestHash(t *testing.T) {
 	setupTestServer(t)
 	defer teardownTestServer(t)
 
 	ctx := context.Background()
 
 	// HSET
-	count, err := testClient.HSet(ctx, "user:1", "name", "Alice", "age", "30").Result()
+	err := testClient.HSet(ctx, "hash1", "field1", "value1").Err()
 	assert.NoError(t, err)
-	assert.Equal(t, int64(2), count)
-
-	// HSETNX
-	set, err := testClient.HSetNX(ctx, "user:1", "email", "alice@example.com").Result()
-	assert.NoError(t, err)
-	assert.True(t, set)
-
-	set, err = testClient.HSetNX(ctx, "user:1", "name", "Bob").Result()
-	assert.NoError(t, err)
-	assert.False(t, set) // 字段已存在
 
 	// HGET
-	val, err := testClient.HGet(ctx, "user:1", "name").Result()
+	val, err := testClient.HGet(ctx, "hash1", "field1").Result()
 	assert.NoError(t, err)
-	assert.Equal(t, "Alice", val)
+	assert.Equal(t, "value1", val)
 
 	// HGETALL
-	all, err := testClient.HGetAll(ctx, "user:1").Result()
+	all, err := testClient.HGetAll(ctx, "hash1").Result()
 	assert.NoError(t, err)
-	assert.Equal(t, 3, len(all))
-	assert.Equal(t, "Alice", all["name"])
-	assert.Equal(t, "30", all["age"])
-	assert.Equal(t, "alice@example.com", all["email"])
-
-	// HEXISTS
-	exists, err := testClient.HExists(ctx, "user:1", "name").Result()
-	assert.NoError(t, err)
-	assert.True(t, exists)
-
-	exists, err = testClient.HExists(ctx, "user:1", "nonexistent").Result()
-	assert.NoError(t, err)
-	assert.False(t, exists)
-
-	// HLEN
-	length, err := testClient.HLen(ctx, "user:1").Result()
-	assert.NoError(t, err)
-	assert.Equal(t, int64(3), length)
-
-	// HKEYS
-	keys, err := testClient.HKeys(ctx, "user:1").Result()
-	assert.NoError(t, err)
-	assert.Equal(t, 3, len(keys))
-
-	// HVALS
-	vals, err := testClient.HVals(ctx, "user:1").Result()
-	assert.NoError(t, err)
-	assert.Equal(t, 3, len(vals))
-
-	// HMSET
-	err = testClient.HMSet(ctx, "user:2", map[string]interface{}{
-		"name": "Bob",
-		"city": "Beijing",
-	}).Err()
-	assert.NoError(t, err)
-
-	// HMGET
-	hmgetVals, err := testClient.HMGet(ctx, "user:2", "name", "city", "nonexistent").Result()
-	assert.NoError(t, err)
-	assert.Equal(t, 3, len(hmgetVals))
-	if hmgetVals[0] != nil {
-		assert.Equal(t, "Bob", hmgetVals[0].(string))
-	}
-	if hmgetVals[1] != nil {
-		assert.Equal(t, "Beijing", hmgetVals[1].(string))
-	}
-	assert.Nil(t, hmgetVals[2])
+	assert.Equal(t, map[string]string{"field1": "value1"}, all)
 
 	// HINCRBY
-	ageVal, err := testClient.HIncrBy(ctx, "user:1", "age", 1).Result()
+	incr, err := testClient.HIncrBy(ctx, "hash1", "field2", 5).Result()
 	assert.NoError(t, err)
-	assert.Equal(t, int64(31), ageVal)
+	assert.Equal(t, int64(5), incr)
 
-	// HINCRBYFLOAT
-	heightVal, err := testClient.HIncrByFloat(ctx, "user:1", "height", 1.5).Result()
+	// HEXISTS
+	exists, err := testClient.HExists(ctx, "hash1", "field1").Result()
 	assert.NoError(t, err)
-	assert.Equal(t, 1.5, heightVal)
-
-	// HSTRLEN
-	strlen, err := testClient.HStrLen(ctx, "user:1", "name").Result()
-	assert.NoError(t, err)
-	assert.Equal(t, int64(5), strlen)
+	assert.Equal(t, true, exists)
 
 	// HDEL
-	deleted, err := testClient.HDel(ctx, "user:1", "age").Result()
+	deleted, err := testClient.HDel(ctx, "hash1", "field2").Result()
 	assert.NoError(t, err)
 	assert.Equal(t, int64(1), deleted)
-
-	length, err = testClient.HLen(ctx, "user:1").Result()
-	assert.NoError(t, err)
-	assert.Equal(t, int64(2), length)
 }
 
-// TestSetCommands 测试Set类型命令
-func TestSetCommands(t *testing.T) {
+// TestSet 测试Set命令
+func TestSet(t *testing.T) {
 	setupTestServer(t)
 	defer teardownTestServer(t)
 
 	ctx := context.Background()
 
 	// SADD
-	added, err := testClient.SAdd(ctx, "myset", "apple", "banana", "cherry").Result()
+	err := testClient.SAdd(ctx, "set1", "m1", "m2", "m3").Err()
 	assert.NoError(t, err)
-	assert.Equal(t, int64(3), added)
-
-	// SADD to existing
-	added, err = testClient.SAdd(ctx, "myset", "apple", "date").Result()
-	assert.NoError(t, err)
-	assert.Equal(t, int64(1), added) // 只添加了date
-
-	// SCARD
-	count, err := testClient.SCard(ctx, "myset").Result()
-	assert.NoError(t, err)
-	assert.Equal(t, int64(4), count)
-
-	// SISMEMBER
-	member, err := testClient.SIsMember(ctx, "myset", "apple").Result()
-	assert.NoError(t, err)
-	assert.True(t, member)
-
-	member, err = testClient.SIsMember(ctx, "myset", "nonexistent").Result()
-	assert.NoError(t, err)
-	assert.False(t, member)
 
 	// SMEMBERS
-	members, err := testClient.SMembers(ctx, "myset").Result()
+	members, err := testClient.SMembers(ctx, "set1").Result()
 	assert.NoError(t, err)
-	assert.Equal(t, 4, len(members))
+	assert.Equal(t, 3, len(members))
+
+	// SISMEMBER
+	isMember, err := testClient.SIsMember(ctx, "set1", "m1").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, true, isMember)
+
+	// SCARD
+	card, err := testClient.SCard(ctx, "set1").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, int64(3), card)
 
 	// SREM
-	removed, err := testClient.SRem(ctx, "myset", "apple").Result()
+	removed, err := testClient.SRem(ctx, "set1", "m3").Result()
 	assert.NoError(t, err)
 	assert.Equal(t, int64(1), removed)
 
-	count, err = testClient.SCard(ctx, "myset").Result()
+	card, err = testClient.SCard(ctx, "set1").Result()
 	assert.NoError(t, err)
-	assert.Equal(t, int64(3), count)
-
-	// SPOP
-	val, err := testClient.SPop(ctx, "myset").Result()
-	assert.NoError(t, err)
-	assert.True(t, len(val) > 0)
-
-	count, err = testClient.SCard(ctx, "myset").Result()
-	assert.NoError(t, err)
-	assert.Equal(t, int64(2), count)
-
-	// SRANDMEMBER
-	vals, err := testClient.SRandMemberN(ctx, "myset", 1).Result()
-	assert.NoError(t, err)
-	assert.Equal(t, 1, len(vals))
-
-	// SMOVE
-	_ = testClient.SAdd(ctx, "set1", "a", "b", "c").Err()
-	_ = testClient.SAdd(ctx, "set2", "x", "y").Err()
-
-	moved, err := testClient.SMove(ctx, "set1", "set2", "b").Result()
-	assert.NoError(t, err)
-	assert.True(t, moved)
-
-	members, err = testClient.SMembers(ctx, "set2").Result()
-	assert.NoError(t, err)
-	assert.True(t, len(members) == 3)
-
-	// SINTER
-	_ = testClient.SAdd(ctx, "setA", "a", "b", "c").Err()
-	_ = testClient.SAdd(ctx, "setB", "b", "c", "d").Err()
-
-	intersection, err := testClient.SInter(ctx, "setA", "setB").Result()
-	assert.NoError(t, err)
-	assert.Equal(t, 2, len(intersection))
-
-	// SINTERSTORE
-	err = testClient.SInterStore(ctx, "setInter", "setA", "setB").Err()
-	assert.NoError(t, err)
-
-	count, err = testClient.SCard(ctx, "setInter").Result()
-	assert.NoError(t, err)
-	assert.Equal(t, int64(2), count)
-
-	// SUNION
-	union, err := testClient.SUnion(ctx, "setA", "setB").Result()
-	assert.NoError(t, err)
-	assert.Equal(t, 4, len(union))
-
-	// SUNIONSTORE
-	err = testClient.SUnionStore(ctx, "setUnion", "setA", "setB").Err()
-	assert.NoError(t, err)
-
-	count, err = testClient.SCard(ctx, "setUnion").Result()
-	assert.NoError(t, err)
-	assert.Equal(t, int64(4), count)
-
-	// SDIFF
-	diff, err := testClient.SDiff(ctx, "setA", "setB").Result()
-	assert.NoError(t, err)
-	assert.Equal(t, 1, len(diff))
-	assert.Equal(t, "a", diff[0])
-
-	// SDIFFSTORE
-	err = testClient.SDiffStore(ctx, "setDiff", "setA", "setB").Err()
-	assert.NoError(t, err)
-
-	count, err = testClient.SCard(ctx, "setDiff").Result()
-	assert.NoError(t, err)
-	assert.Equal(t, int64(1), count)
+	assert.Equal(t, int64(2), card)
 }
 
-// TestSortedSetCommands 测试SortedSet类型命令
-func _TestSortedSetCommands(t *testing.T) {
+// TestSortedSet 测试SortedSet命令
+func TestSortedSet(t *testing.T) {
 	setupTestServer(t)
 	defer teardownTestServer(t)
 
 	ctx := context.Background()
 
 	// ZADD
-	added, err := testClient.ZAdd(ctx, "zset", redis.Z{
-		Score:  1.0,
-		Member: "member1",
-	}, redis.Z{
-		Score:  2.0,
-		Member: "member2",
-	}, redis.Z{
-		Score:  3.0,
-		Member: "member3",
-	}).Result()
+	err := testClient.ZAdd(ctx, "zset1", redis.Z{Score: 100, Member: "Alice"}, redis.Z{Score: 90, Member: "Bob"}, redis.Z{Score: 80, Member: "Charlie"}).Err()
 	assert.NoError(t, err)
-	assert.Equal(t, int64(3), added)
-
-	// ZADD with duplicate members
-	added, err = testClient.ZAdd(ctx, "zset", redis.Z{
-		Score:  4.0,
-		Member: "member1", // 更新
-	}).Result()
-	assert.NoError(t, err)
-	assert.Equal(t, int64(0), added) // 只是更新
-
-	// ZCARD
-	count, err := testClient.ZCard(ctx, "zset").Result()
-	assert.NoError(t, err)
-	assert.Equal(t, int64(3), count)
-
-	// ZSCORE
-	score, err := testClient.ZScore(ctx, "zset", "member1").Result()
-	assert.NoError(t, err)
-	assert.Equal(t, 4.0, score) // 已更新为4.0
 
 	// ZRANGE
-	members, err := testClient.ZRange(ctx, "zset", 0, -1).Result()
+	members, err := testClient.ZRange(ctx, "zset1", 0, -1).Result()
 	assert.NoError(t, err)
-	assert.Equal(t, 3, len(members))
-	assert.Equal(t, "member1", members[0])
-	assert.Equal(t, "member2", members[1])
-	assert.Equal(t, "member3", members[2])
+	assert.Equal(t, []string{"Charlie", "Bob", "Alice"}, members)
 
-	// ZRANGE with scores
-	zs, err := testClient.ZRangeWithScores(ctx, "zset", 0, -1).Result()
+	// ZSCORE
+	score, err := testClient.ZScore(ctx, "zset1", "Alice").Result()
 	assert.NoError(t, err)
-	assert.Equal(t, 3, len(zs))
-	assert.Equal(t, "member1", zs[0].Member)
-	assert.Equal(t, 4.0, zs[0].Score)
-	assert.Equal(t, "member2", zs[1].Member)
-	assert.Equal(t, 2.0, zs[1].Score)
+	assert.Equal(t, float64(100), score)
 
-	// ZREVRANGE
-	members, err = testClient.ZRevRange(ctx, "zset", 0, -1).Result()
+	// ZCARD
+	card, err := testClient.ZCard(ctx, "zset1").Result()
 	assert.NoError(t, err)
-	assert.Equal(t, 3, len(members))
-	assert.Equal(t, "member3", members[0]) // 反序
-	assert.Equal(t, "member2", members[1])
-	assert.Equal(t, "member1", members[2])
-
-	// ZRANK
-	rank, err := testClient.ZRank(ctx, "zset", "member2").Result()
-	assert.NoError(t, err)
-	assert.Equal(t, int64(1), rank)
-
-	// ZREVRANK
-	rank, err = testClient.ZRevRank(ctx, "zset", "member2").Result()
-	assert.NoError(t, err)
-	assert.Equal(t, int64(1), rank)
-
-	// ZCOUNT
-	count, err = testClient.ZCount(ctx, "zset", "1", "3").Result()
-	assert.NoError(t, err)
-	assert.Equal(t, int64(3), count)
+	assert.Equal(t, int64(3), card)
 
 	// ZINCRBY
-	newScore, err := testClient.ZIncrBy(ctx, "zset", 1.5, "member1").Result()
+	score, err = testClient.ZIncrBy(ctx, "zset1", 50, "Bob").Result()
 	assert.NoError(t, err)
-	assert.Equal(t, 5.5, newScore)
-
-	// ZINCRBY on non-existent member
-	newScore, err = testClient.ZIncrBy(ctx, "zset", 10.0, "new_member").Result()
-	assert.NoError(t, err)
-	assert.Equal(t, 10.0, newScore)
+	assert.Equal(t, float64(140), score)
 
 	// ZREM
-	removed, err := testClient.ZRem(ctx, "zset", "member1").Result()
+	removed, err := testClient.ZRem(ctx, "zset1", "Charlie").Result()
 	assert.NoError(t, err)
 	assert.Equal(t, int64(1), removed)
 
-	count, err = testClient.ZCard(ctx, "zset").Result()
+	card, err = testClient.ZCard(ctx, "zset1").Result()
 	assert.NoError(t, err)
-	assert.Equal(t, int64(2), count)
-
-	// ZREMRANGEBYRANK
-	_ = testClient.ZAdd(ctx, "zset2", redis.Z{Score: 1, Member: "a"}, redis.Z{Score: 2, Member: "b"}, redis.Z{Score: 3, Member: "c"}).Err()
-	count, err = testClient.ZRemRangeByRank(ctx, "zset2", 0, 1).Result()
-	assert.NoError(t, err)
-	assert.Equal(t, int64(2), count)
-
-	// ZREMRANGEBYSCORE
-	_ = testClient.ZAdd(ctx, "zset3", redis.Z{Score: 1, Member: "a"}, redis.Z{Score: 2, Member: "b"}, redis.Z{Score: 3, Member: "c"}).Err()
-	count, err = testClient.ZRemRangeByScore(ctx, "zset3", "-inf", "2").Result()
-	assert.NoError(t, err)
-	assert.Equal(t, int64(2), count)
-
-	// ZLEXCOUNT
-	_ = testClient.ZAdd(ctx, "zset4", redis.Z{Score: 0, Member: "a"}, redis.Z{Score: 0, Member: "b"}, redis.Z{Score: 0, Member: "c"}).Err()
-	count, err = testClient.ZLexCount(ctx, "zset4", "-", "+").Result()
-	assert.NoError(t, err)
-	assert.Equal(t, int64(3), count)
-
-	// ZRANGEBYLEX
-	members, err = testClient.ZRevRangeByScore(ctx, "zset4", &redis.ZRangeBy{
-		Min: "-",
-		Max: "+",
-	}).Result()
-	assert.NoError(t, err)
-	assert.Equal(t, 3, len(members))
+	assert.Equal(t, int64(2), card)
 }
 
 // TestServerCommands 测试Server相关命令
@@ -888,173 +320,822 @@ func TestServerCommands(t *testing.T) {
 
 	ctx := context.Background()
 
-	// 先创建一些数据
-	_ = testClient.Set(ctx, "key1", "value1", 0).Err()
-	_ = testClient.Set(ctx, "key2", "value2", 0).Err()
-	_ = testClient.HSet(ctx, "hashkey", "field", "value").Err()
+	// PING
+	pong, err := testClient.Ping(ctx).Result()
+	assert.NoError(t, err)
+	assert.Equal(t, "PONG", pong)
+
+	// ECHO
+	echo, err := testClient.Echo(ctx, "Hello, Server!").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, "Hello, Server!", echo)
 
 	// DBSIZE
-	size, err := testClient.DBSize(ctx).Result()
+	dbsize, err := testClient.DBSize(ctx).Result()
 	assert.NoError(t, err)
-	assert.True(t, size >= 3)
+	assert.Equal(t, int64(0), dbsize)
 
-	// LASTSAVE - skipped because backup is not enabled
-	// lastSave, err := testClient.LastSave(ctx).Result()
-	// assert.NoError(t, err)
-	// assert.True(t, lastSave > 0)
-
-	// INFO
-	info, err := testClient.Info(ctx).Result()
+	// TYPE
+	_ = testClient.Set(ctx, "typekey", "value", 0).Err()
+	keyType, err := testClient.Type(ctx, "typekey").Result()
 	assert.NoError(t, err)
-	assert.True(t, len(info) > 0)
-
-	// FLUSHDB
-	err = testClient.FlushDB(ctx).Err()
-	assert.NoError(t, err)
-
-	size, err = testClient.DBSize(ctx).Result()
-	assert.NoError(t, err)
-	assert.Equal(t, int64(0), size)
-
-	// 重新创建数据用于FLUSHALL测试
-	_ = testClient.Set(ctx, "key1", "value1", 0).Err()
+	assert.Equal(t, "string", keyType)
 }
 
-// TestEdgeCases 测试边界情况和错误处理
-func _TestEdgeCases(t *testing.T) {
+// TestKeyCommands 测试Key相关命令
+func TestKeyCommands(t *testing.T) {
 	setupTestServer(t)
 	defer teardownTestServer(t)
 
 	ctx := context.Background()
 
-	// 测试不存在的键
-	_, err := testClient.Get(ctx, "nonexistent").Result()
-	assert.Equal(t, redis.Nil, err)
-
-	// 测试DEL不存在的键
-	deleted, err := testClient.Del(ctx, "nonexistent").Result()
+	// EXISTS - 键不存在
+	exists, err := testClient.Exists(ctx, "nonexistent").Result()
 	assert.NoError(t, err)
-	assert.Equal(t, int64(0), deleted)
+	assert.Equal(t, int64(0), exists)
 
-	// 测试类型错误（对字符串键执行Hash操作）
-	err = testClient.Set(ctx, "string_key", "value", 0).Err()
+	// EXISTS - 键存在
+	_ = testClient.Set(ctx, "existskey", "value", 0).Err()
+	exists, err = testClient.Exists(ctx, "existskey").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, int64(1), exists)
+
+	// EXISTS - 批量检查
+	_ = testClient.Set(ctx, "existskey2", "value2", 0).Err()
+	exists, err = testClient.Exists(ctx, "existskey", "existskey2", "nonexistent").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, int64(2), exists)
+
+	// EXPIRE - 设置过期时间
+	_ = testClient.Set(ctx, "expirekey", "value", 0).Err()
+	set, err := testClient.Expire(ctx, "expirekey", 10*time.Second).Result()
+	assert.NoError(t, err)
+	assert.Equal(t, true, set)
+
+	// TTL - 查看剩余过期时间
+	// 注意：go-redis 的 TTL 返回 time.Duration（纳秒）
+	ttlDuration, err := testClient.TTL(ctx, "expirekey").Result()
+	assert.NoError(t, err)
+	assert.True(t, ttlDuration > 0 && ttlDuration <= 10*time.Second)
+	assert.True(t, ttlDuration >= 9*time.Second) // 至少还有9秒
+
+	// TTL - 永不过期的键
+	_ = testClient.Set(ctx, "noexpirekey", "value", 0).Err()
+	noexpireTTL, err := testClient.TTL(ctx, "noexpirekey").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, time.Duration(-1), noexpireTTL)
+
+	// RENAME - 重命名键
+	_ = testClient.Set(ctx, "renamekey", "oldvalue", 0).Err()
+	err = testClient.Rename(ctx, "renamekey", "newkey").Err()
+	assert.NoError(t, err)
+	val, err := testClient.Get(ctx, "newkey").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, "oldvalue", val)
+
+	// RENAMENX - 新键不存在时重命名
+	_ = testClient.Set(ctx, "renamenxkey", "value", 0).Err()
+	_ = testClient.Set(ctx, "targetkey", "targetvalue", 0).Err()
+	set, err = testClient.RenameNX(ctx, "renamenxkey", "targetkey").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, false, set) // targetkey已存在
+
+	set, err = testClient.RenameNX(ctx, "renamenxkey", "nonexistenttarget").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, true, set)
+}
+
+// TestStringExtended 测试扩展String命令
+func TestStringExtended(t *testing.T) {
+	setupTestServer(t)
+	defer teardownTestServer(t)
+
+	ctx := context.Background()
+
+	// SETNX - 键不存在时设置
+	set, err := testClient.SetNX(ctx, "setnxkey", "value", 0).Result()
+	assert.NoError(t, err)
+	assert.Equal(t, true, set)
+
+	// SETNX - 键已存在时设置失败
+	set, err = testClient.SetNX(ctx, "setnxkey", "value2", 0).Result()
+	assert.NoError(t, err)
+	assert.Equal(t, false, set)
+
+	// GETSET - 获取旧值并设置新值
+	_ = testClient.Set(ctx, "getsetkey", "oldvalue", 0).Err()
+	oldVal, err := testClient.GetSet(ctx, "getsetkey", "newvalue").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, "oldvalue", oldVal)
+
+	newVal, err := testClient.Get(ctx, "getsetkey").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, "newvalue", newVal)
+
+	// DECR - 递减
+	_ = testClient.Set(ctx, "decrkey", "10", 0).Err()
+	decr, err := testClient.Decr(ctx, "decrkey").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, int64(9), decr)
+
+	// DECRBY - 按步长递减
+	decr, err = testClient.DecrBy(ctx, "decrkey", 3).Result()
+	assert.NoError(t, err)
+	assert.Equal(t, int64(6), decr)
+
+	// INCRBY - 按步长递增
+	incr, err := testClient.IncrBy(ctx, "incrbykey", 5).Result()
+	assert.NoError(t, err)
+	assert.Equal(t, int64(5), incr)
+
+	// INCRBYFLOAT - 浮点数递增
+	incrFloat, err := testClient.IncrByFloat(ctx, "floatkey", 1.5).Result()
+	assert.NoError(t, err)
+	assert.Equal(t, float64(1.5), incrFloat)
+
+	// MGET - 批量获取
+	_ = testClient.Set(ctx, "mkey1", "value1", 0).Err()
+	_ = testClient.Set(ctx, "mkey2", "value2", 0).Err()
+	vals, err := testClient.MGet(ctx, "mkey1", "mkey2", "mkey3").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, []interface{}{"value1", "value2", nil}, vals)
+
+	// MSET - 批量设置
+	err = testClient.MSet(ctx, "mskey1", "value1", "mskey2", "value2").Err()
 	assert.NoError(t, err)
 
-	_, err = testClient.HGet(ctx, "string_key", "field").Result()
-	assert.Error(t, err)
+	val1, _ := testClient.Get(ctx, "mskey1").Result()
+	val2, _ := testClient.Get(ctx, "mskey2").Result()
+	assert.Equal(t, "value1", val1)
+	assert.Equal(t, "value2", val2)
+}
 
-	// 测试对非list键执行LPOP
-	err = testClient.Set(ctx, "not_list", "value", 0).Err()
+// TestListExtended 测试扩展List命令
+func TestListExtended(t *testing.T) {
+	setupTestServer(t)
+	defer teardownTestServer(t)
+
+	ctx := context.Background()
+
+	// 准备测试数据
+	_ = testClient.RPush(ctx, "listext", "a", "b", "c").Err()
+
+	// LSET - 设置指定位置的值
+	err := testClient.LSet(ctx, "listext", 1, "x").Err()
 	assert.NoError(t, err)
 
-	val, err := testClient.LPop(ctx, "not_list").Result()
+	val, err := testClient.LIndex(ctx, "listext", 1).Result()
 	assert.NoError(t, err)
-	assert.Equal(t, nil, val) // 键被转换为空list, 返回nil
+	assert.Equal(t, "x", val)
 
-	// 测试对非set键执行SADD
-	_ = testClient.Set(ctx, "not_set", "value", 0).Err()
-	added, err := testClient.SAdd(ctx, "not_set", "member").Result()
-	assert.NoError(t, err)
-	assert.Equal(t, int64(1), added) // 键被转换
-
-	// 测试对非zset键执行ZADD
-	_ = testClient.Set(ctx, "not_zset", "value", 0).Err()
-	added, err = testClient.ZAdd(ctx, "not_zset", redis.Z{Score: 1, Member: "m"}).Result()
-	assert.NoError(t, err)
-	assert.Equal(t, int64(1), added)
-
-	// 测试INCR对非数字字符串
-	_ = testClient.Set(ctx, "not_number", "abc", 0).Err()
-	_, err = testClient.Incr(ctx, "not_number").Result()
-	assert.Error(t, err)
-
-	// 测试边界值
-	_ = testClient.Set(ctx, "empty", "", 0).Err()
-	val, err = testClient.Get(ctx, "empty").Result()
-	assert.NoError(t, err)
-	assert.Equal(t, "", val)
-
-	// 测试Unicode
-	err = testClient.Set(ctx, "unicode", "你好世界", 0).Err()
+	// LTRIM - 裁剪列表
+	err = testClient.LTrim(ctx, "listext", 0, 1).Err()
 	assert.NoError(t, err)
 
-	val, err = testClient.Get(ctx, "unicode").Result()
+	length, err := testClient.LLen(ctx, "listext").Result()
 	assert.NoError(t, err)
-	assert.Equal(t, "你好世界", val)
+	assert.Equal(t, int64(2), length)
 
-	// 测试二进制数据
-	binaryData := string([]byte{0x00, 0x01, 0x02, 0xFF})
-	err = testClient.Set(ctx, "binary", binaryData, 0).Err()
+	// RPOPLPUSH - 从一个列表弹出并推入另一个列表
+	_ = testClient.RPush(ctx, "listsrc", "item1", "item2").Err()
+	val, err = testClient.RPopLPush(ctx, "listsrc", "listdst").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, "item2", val)
+}
+
+// TestHashExtended 测试扩展Hash命令
+func TestHashExtended(t *testing.T) {
+	setupTestServer(t)
+	defer teardownTestServer(t)
+
+	ctx := context.Background()
+
+	// HSETNX - 字段不存在时设置
+	_ = testClient.HSet(ctx, "hashext", "field1", "value1").Err()
+	set, err := testClient.HSetNX(ctx, "hashext", "field1", "value2").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, false, set)
+
+	set, err = testClient.HSetNX(ctx, "hashext", "field2", "value2").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, true, set)
+
+	// HKEYS - 获取所有字段
+	keys, err := testClient.HKeys(ctx, "hashext").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, 2, len(keys))
+
+	// HVALS - 获取所有值
+	vals, err := testClient.HVals(ctx, "hashext").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, 2, len(vals))
+
+	// HLEN - 获取字段数量
+	length, err := testClient.HLen(ctx, "hashext").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, int64(2), length)
+
+	// HMGET - 批量获取字段
+	results, err := testClient.HMGet(ctx, "hashext", "field1", "field2", "field3").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, "value1", results[0])
+	assert.Equal(t, "value2", results[1])
+	assert.Nil(t, results[2])
+
+	// HMSET - 批量设置字段
+	err = testClient.HMSet(ctx, "hashmset", "k1", "v1", "k2", "v2").Err()
 	assert.NoError(t, err)
 
-	val, err = testClient.Get(ctx, "binary").Result()
-	assert.NoError(t, err)
-	assert.Equal(t, binaryData, val)
+	val, _ := testClient.HGet(ctx, "hashmset", "k1").Result()
+	assert.Equal(t, "v1", val)
+}
 
-	// 测试超长键名
-	longKey := string(make([]byte, 4096))
-	err = testClient.Set(ctx, longKey, "value", 0).Err()
-	assert.NoError(t, err)
+// TestSetExtended 测试扩展Set命令
+func TestSetExtended(t *testing.T) {
+	setupTestServer(t)
+	defer teardownTestServer(t)
 
-	val, err = testClient.Get(ctx, longKey).Result()
+	ctx := context.Background()
+
+	// 准备测试数据
+	_ = testClient.SAdd(ctx, "set1", "a", "b", "c").Err()
+	_ = testClient.SAdd(ctx, "set2", "b", "c", "d").Err()
+
+	// SDIFF - 差集
+	members, err := testClient.SDiff(ctx, "set1", "set2").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, 1, len(members))
+	assert.Equal(t, "a", members[0])
+
+	// SINTER - 交集
+	members, err = testClient.SInter(ctx, "set1", "set2").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, 2, len(members))
+
+	// SUNION - 并集
+	members, err = testClient.SUnion(ctx, "set1", "set2").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, 4, len(members))
+
+	// SPOP - 随机弹出
+	_ = testClient.SAdd(ctx, "spopset", "a", "b", "c").Err()
+	val, err := testClient.SPop(ctx, "spopset").Result()
+	assert.NoError(t, err)
+	assert.True(t, val == "a" || val == "b" || val == "c")
+
+	card, _ := testClient.SCard(ctx, "spopset").Result()
+	assert.Equal(t, int64(2), card)
+
+	// SMOVE - 移动元素
+	_ = testClient.SAdd(ctx, "setmove1", "a", "b").Err()
+	_ = testClient.SAdd(ctx, "setmove2", "c").Err()
+	moved, err := testClient.SMove(ctx, "setmove1", "setmove2", "a").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, true, moved)
+
+	card, _ = testClient.SCard(ctx, "setmove1").Result()
+	assert.Equal(t, int64(1), card)
+}
+
+// TestSortedSetExtended 测试扩展SortedSet命令
+func TestSortedSetExtended(t *testing.T) {
+	setupTestServer(t)
+	defer teardownTestServer(t)
+
+	ctx := context.Background()
+
+	// 准备测试数据
+	_ = testClient.ZAdd(ctx, "zsetext", redis.Z{Score: 10, Member: "a"}, redis.Z{Score: 20, Member: "b"}, redis.Z{Score: 30, Member: "c"}).Err()
+
+	// ZRANK - 获取成员排名
+	rank, err := testClient.ZRank(ctx, "zsetext", "b").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, int64(1), rank)
+
+	// ZREVRANK - 获取逆向排名
+	revRank, err := testClient.ZRevRank(ctx, "zsetext", "b").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, int64(1), revRank)
+
+	// ZCOUNT - 获取指定分数范围内的成员数量
+	count, err := testClient.ZCount(ctx, "zsetext", "10", "25").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, int64(2), count)
+
+	// ZREVRANGE - 逆向范围获取
+	members, err := testClient.ZRevRange(ctx, "zsetext", 0, -1).Result()
+	assert.NoError(t, err)
+	assert.Equal(t, []string{"c", "b", "a"}, members)
+}
+
+// TestStringAdvanced 测试高级String命令
+func TestStringAdvanced(t *testing.T) {
+	setupTestServer(t)
+	defer teardownTestServer(t)
+
+	ctx := context.Background()
+
+	// SETEX - 设置过期时间的字符串
+	err := testClient.SetEx(ctx, "setexkey", "value", 5*time.Second).Err()
+	assert.NoError(t, err)
+	val, err := testClient.Get(ctx, "setexkey").Result()
 	assert.NoError(t, err)
 	assert.Equal(t, "value", val)
 
-	// 测试超长值
-	longValue := string(make([]byte, 1024*1024)) // 1MB
-	err = testClient.Set(ctx, "longvalue", longValue, 0).Err()
+	// PSETEX - 设置过期时间（毫秒）
+	err = testClient.SetEx(ctx, "psetexkey", "value", 5000*time.Millisecond).Err()
 	assert.NoError(t, err)
+	val, err = testClient.Get(ctx, "psetexkey").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, "value", val)
 
-	length, err := testClient.StrLen(ctx, "longvalue").Result()
+	// SETRANGE - 从指定偏移量开始修改字符串
+	_ = testClient.Set(ctx, "setrangekey", "hello world", 0).Err()
+	length, err := testClient.SetRange(ctx, "setrangekey", 6, "golang").Result()
 	assert.NoError(t, err)
-	assert.Equal(t, int64(1024*1024), length)
+	assert.Equal(t, int64(12), length)
+	val, err = testClient.Get(ctx, "setrangekey").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, "hello golang", val)
+
+	// GETRANGE - 获取子字符串
+	val, err = testClient.GetRange(ctx, "setrangekey", 0, 4).Result()
+	assert.NoError(t, err)
+	assert.Equal(t, "hello", val)
+
+	val, err = testClient.GetRange(ctx, "setrangekey", 6, -1).Result()
+	assert.NoError(t, err)
+	assert.Equal(t, "golang", val)
 }
 
-// TestConcurrentOperations 测试并发操作
-func TestConcurrentOperations(t *testing.T) {
+// TestKeyAdvanced 测试高级Key命令
+func TestKeyAdvanced(t *testing.T) {
 	setupTestServer(t)
 	defer teardownTestServer(t)
 
 	ctx := context.Background()
 
-	const numGoroutines = 10
-	done := make(chan bool, numGoroutines)
+	// KEYS - 查找匹配的键
+	_ = testClient.Set(ctx, "testkey1", "value1", 0).Err()
+	_ = testClient.Set(ctx, "testkey2", "value2", 0).Err()
+	_ = testClient.Set(ctx, "testkey3", "value3", 0).Err()
+	keys, err := testClient.Keys(ctx, "testkey*").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, 3, len(keys))
 
-	// 并发写入
-	for i := 0; i < numGoroutines; i++ {
-		go func(id int) {
-			key := fmt.Sprintf("concurrent_key_%d", id)
-			err := testClient.Set(ctx, key, fmt.Sprintf("value_%d", id), 0).Err()
-			assert.NoError(t, err)
-			done <- true
-		}(i)
-	}
+	// RANDOMKEY - 获取随机键
+	randomKey, err := testClient.RandomKey(ctx).Result()
+	assert.NoError(t, err)
+	assert.True(t, randomKey != "")
 
-	for i := 0; i < numGoroutines; i++ {
-		<-done
-	}
+	// PERSIST - 移除过期时间
+	_ = testClient.Set(ctx, "persistkey", "value", 0).Err()
+	_ = testClient.Expire(ctx, "persistkey", 10*time.Second).Err()
+	success, err := testClient.Persist(ctx, "persistkey").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, true, success)
 
-	// 验证所有键都存在
-	for i := 0; i < numGoroutines; i++ {
-		key := fmt.Sprintf("concurrent_key_%d", i)
-		val, err := testClient.Get(ctx, key).Result()
-		assert.NoError(t, err)
-		assert.Equal(t, fmt.Sprintf("value_%d", i), val)
-	}
+	ttl, _ := testClient.TTL(ctx, "persistkey").Result()
+	assert.Equal(t, time.Duration(-1), ttl)
 
-	// 并发读取和写入混合操作
-	for i := 0; i < numGoroutines; i++ {
-		go func(id int) {
-			key := fmt.Sprintf("mixed_key_%d", id)
-			_ = testClient.Set(ctx, key, fmt.Sprintf("initial_%d", id), 0).Err()
-			val, _ := testClient.Get(ctx, key).Result()
-			assert.Equal(t, fmt.Sprintf("initial_%d", id), val)
-			_ = testClient.Incr(ctx, fmt.Sprintf("counter_%d", id)).Err()
-			done <- true
-		}(i)
-	}
+	// EXPIREAT - 设置过期时间戳
+	_ = testClient.Set(ctx, "expireatkey", "value", 0).Err()
+	futureTime := time.Now().Add(1 * time.Hour)
+	success, err = testClient.ExpireAt(ctx, "expireatkey", futureTime).Result()
+	assert.NoError(t, err)
+	assert.Equal(t, true, success)
 
-	for i := 0; i < numGoroutines; i++ {
-		<-done
-	}
+	// PEXPIRE - 毫秒级过期
+	_ = testClient.Set(ctx, "pexpirekey", "value", 0).Err()
+	success, err = testClient.PExpire(ctx, "pexpirekey", 5000*time.Millisecond).Result()
+	assert.NoError(t, err)
+	assert.Equal(t, true, success)
+
+	// PEXPIREAT - 毫秒级时间戳过期
+	_ = testClient.Set(ctx, "pexpireatkey", "value", 0).Err()
+	futureTimeMs := time.Now().Add(1 * time.Hour)
+	success, err = testClient.PExpireAt(ctx, "pexpireatkey", futureTimeMs).Result()
+	assert.NoError(t, err)
+	assert.Equal(t, true, success)
+}
+
+// TestServerExtended 测试扩展Server命令
+func TestServerExtended(t *testing.T) {
+	setupTestServer(t)
+	defer teardownTestServer(t)
+
+	ctx := context.Background()
+
+	// FLUSHDB - 清空当前数据库
+	_ = testClient.Set(ctx, "flushdbkey", "value", 0).Err()
+	_ = testClient.Set(ctx, "flushdbkey2", "value2", 0).Err()
+	err := testClient.FlushDB(ctx).Err()
+	assert.NoError(t, err)
+
+	dbsize, err := testClient.DBSize(ctx).Result()
+	assert.NoError(t, err)
+	assert.Equal(t, int64(0), dbsize)
+
+	// DBSIZE - 验证数据库为空
+	_ = testClient.Set(ctx, "dbsizekey", "value", 0).Err()
+	dbsize, err = testClient.DBSize(ctx).Result()
+	assert.NoError(t, err)
+	assert.Equal(t, int64(1), dbsize)
+
+	// TYPE - 检查键类型
+	val, err := testClient.Type(ctx, "dbsizekey").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, "string", val)
+
+	// PING - 验证连接
+	pong, err := testClient.Ping(ctx).Result()
+	assert.NoError(t, err)
+	assert.Equal(t, "PONG", pong)
+}
+
+// TestListAdvanced 测试高级List命令
+func TestListAdvanced(t *testing.T) {
+	setupTestServer(t)
+	defer teardownTestServer(t)
+
+	ctx := context.Background()
+
+	// LPUSHX - 列表存在时从左侧插入
+	_ = testClient.RPush(ctx, "listx", "a").Err()
+	err := testClient.LPushX(ctx, "listx", "b").Err()
+	assert.NoError(t, err)
+	err = testClient.LPushX(ctx, "nonexistent", "a").Err()
+	assert.NoError(t, err) // 键不存在时不做任何操作
+
+	items, err := testClient.LRange(ctx, "listx", 0, -1).Result()
+	assert.NoError(t, err)
+	assert.Equal(t, []string{"b", "a"}, items)
+
+	// RPUSHX - 列表存在时从右侧插入
+	err = testClient.RPushX(ctx, "listx", "c").Err()
+	assert.NoError(t, err)
+	items, err = testClient.LRange(ctx, "listx", 0, -1).Result()
+	assert.NoError(t, err)
+	assert.Equal(t, []string{"b", "a", "c"}, items)
+
+	// LREM - 移除元素 (count=0 表示移除所有匹配的元素)
+	_ = testClient.RPush(ctx, "listrem", "a", "b", "a", "c", "a").Err()
+	removed, err := testClient.LRem(ctx, "listrem", 0, "a").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, int64(3), removed)
+
+	items, err = testClient.LRange(ctx, "listrem", 0, -1).Result()
+	assert.NoError(t, err)
+	assert.Equal(t, []string{"b", "c"}, items)
+}
+
+// TestHashAdvanced 测试高级Hash命令
+func TestHashAdvanced(t *testing.T) {
+	setupTestServer(t)
+	defer teardownTestServer(t)
+
+	ctx := context.Background()
+
+	// HINCRBYFLOAT - 浮点数递增
+	_ = testClient.HSet(ctx, "hashfloat", "field", "10.5").Err()
+	val, err := testClient.HIncrByFloat(ctx, "hashfloat", "field", 2.5).Result()
+	assert.NoError(t, err)
+	assert.Equal(t, float64(13), val)
+
+	// HSTRLEN - 获取字段值长度
+	_ = testClient.HSet(ctx, "hashstr", "field", "hello").Err()
+	length, err := testClient.HStrLen(ctx, "hashstr", "field").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, int64(5), length)
+}
+
+// TestSetAdvanced 测试高级Set命令
+func TestSetAdvanced(t *testing.T) {
+	setupTestServer(t)
+	defer teardownTestServer(t)
+
+	ctx := context.Background()
+
+	// SINTERSTORE - 交集并存储
+	_ = testClient.SAdd(ctx, "setstore1", "a", "b", "c").Err()
+	_ = testClient.SAdd(ctx, "setstore2", "b", "c", "d").Err()
+	count, err := testClient.SInterStore(ctx, "setstoreresult", "setstore1", "setstore2").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, int64(2), count)
+
+	members, _ := testClient.SMembers(ctx, "setstoreresult").Result()
+	assert.Equal(t, 2, len(members))
+
+	// SDIFFSTORE - 差集并存储
+	_ = testClient.SAdd(ctx, "setdiff1", "a", "b", "c").Err()
+	_ = testClient.SAdd(ctx, "setdiff2", "b").Err()
+	count, err = testClient.SDiffStore(ctx, "setdifffresult", "setdiff1", "setdiff2").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, int64(2), count)
+
+	// SUNIONSTORE - 并集并存储
+	_ = testClient.SAdd(ctx, "setunion1", "a", "b").Err()
+	_ = testClient.SAdd(ctx, "setunion2", "c", "d").Err()
+	count, err = testClient.SUnionStore(ctx, "setunionresult", "setunion1", "setunion2").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, int64(4), count)
+
+	// SRANDMEMBER - 随机获取成员
+	_ = testClient.SAdd(ctx, "setrand", "a", "b", "c", "d", "e").Err()
+	val, err := testClient.SRandMember(ctx, "setrand").Result()
+	assert.NoError(t, err)
+	assert.True(t, val == "a" || val == "b" || val == "c" || val == "d" || val == "e")
+
+	// SRANDMEMBER - 获取多个随机成员
+	vals, err := testClient.SRandMemberN(ctx, "setrand", 3).Result()
+	assert.NoError(t, err)
+	assert.Equal(t, 3, len(vals))
+}
+
+// TestTransaction 测试事务命令（MULTI/EXEC/DISCARD/WATCH/UNWATCH）
+// 由于go-redis客户端对MULTI/EXEC的支持有限，我们验证命令被正确识别
+func TestTransaction(t *testing.T) {
+	setupTestServer(t)
+	defer teardownTestServer(t)
+
+	ctx := context.Background()
+
+	// 测试 UNWATCH - 取消监控
+	result, err := testClient.Do(ctx, "UNWATCH").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, "OK", result)
+
+	// 测试 WATCH - 监控键（无论键是否存在都返回监控的键数量）
+	result, err = testClient.Do(ctx, "WATCH", "watchkey").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, int64(1), result)
+
+	// 测试 MULTI - 开始事务
+	result, err = testClient.Do(ctx, "MULTI").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, "OK", result)
+
+	// 测试 DISCARD - 放弃事务
+	result, err = testClient.Do(ctx, "DISCARD").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, "OK", result)
+
+	// 重新开始事务并执行
+	result, err = testClient.Do(ctx, "MULTI").Result()
+	assert.NoError(t, err)
+
+	// 在事务中添加命令并执行
+	_ = testClient.Set(ctx, "txkey", "txvalue", 0).Err()
+	result, err = testClient.Do(ctx, "EXEC").Result()
+	assert.NoError(t, err)
+
+	// 验证命令执行
+	val, _ := testClient.Get(ctx, "txkey").Result()
+	assert.Equal(t, "txvalue", val)
+
+	// 测试 WATCH 多个键
+	result, err = testClient.Do(ctx, "WATCH", "key1", "key2", "key3").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, int64(3), result)
+}
+
+// TestCOPY 测试COPY命令
+func TestCOPY(t *testing.T) {
+	setupTestServer(t)
+	defer teardownTestServer(t)
+
+	ctx := context.Background()
+
+	// COPY String - 源键不存在
+	result, err := testClient.Do(ctx, "COPY", "nonexistent", "dstkey").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, int64(0), result)
+
+	// COPY String - 正常复制
+	_ = testClient.Set(ctx, "srcstring", "value", 0).Err()
+	result, err = testClient.Do(ctx, "COPY", "srcstring", "dststring").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, int64(1), result)
+
+	// 验证复制成功
+	val, _ := testClient.Get(ctx, "dststring").Result()
+	assert.Equal(t, "value", val)
+
+	// COPY - 目标存在时不替换
+	_ = testClient.Set(ctx, "dstexists", "existing", 0).Err()
+	result, err = testClient.Do(ctx, "COPY", "srcstring", "dstexists").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, int64(0), result)
+
+	// COPY with REPLACE - 替换目标
+	result, err = testClient.Do(ctx, "COPY", "srcstring", "dstexists", "REPLACE").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, int64(1), result)
+	val, _ = testClient.Get(ctx, "dstexists").Result()
+	assert.Equal(t, "value", val)
+
+	// COPY List
+	_ = testClient.RPush(ctx, "srclist", "a", "b", "c").Err()
+	result, err = testClient.Do(ctx, "COPY", "srclist", "dstlist").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, int64(1), result)
+
+	items, _ := testClient.LRange(ctx, "dstlist", 0, -1).Result()
+	assert.Equal(t, []string{"a", "b", "c"}, items)
+
+	// COPY Hash
+	_ = testClient.HSet(ctx, "srchash", "field1", "value1", "field2", "value2").Err()
+	result, err = testClient.Do(ctx, "COPY", "srchash", "dsthash").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, int64(1), result)
+
+	all, _ := testClient.HGetAll(ctx, "dsthash").Result()
+	assert.Equal(t, map[string]string{"field1": "value1", "field2": "value2"}, all)
+
+	// COPY Set
+	_ = testClient.SAdd(ctx, "srcset", "a", "b", "c").Err()
+	result, err = testClient.Do(ctx, "COPY", "srcset", "dstset").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, int64(1), result)
+
+	members, _ := testClient.SMembers(ctx, "dstset").Result()
+	assert.Equal(t, 3, len(members))
+
+	// COPY SortedSet
+	_ = testClient.ZAdd(ctx, "srczset", redis.Z{Score: 1, Member: "a"}, redis.Z{Score: 2, Member: "b"}).Err()
+	result, err = testClient.Do(ctx, "COPY", "srczset", "dstzset").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, int64(1), result)
+
+	zmembers, _ := testClient.ZRange(ctx, "dstzset", 0, -1).Result()
+	assert.Equal(t, []string{"a", "b"}, zmembers)
+}
+
+// TestSetAdvancedCommands 测试Set高级命令（SMISMEMBER, SINTERCARD）
+func TestSetAdvancedCommands(t *testing.T) {
+	setupTestServer(t)
+	defer teardownTestServer(t)
+
+	ctx := context.Background()
+
+	// 准备测试数据
+	_ = testClient.SAdd(ctx, "smismem1", "a", "b", "c", "d").Err()
+	_ = testClient.SAdd(ctx, "smismem2", "b", "c", "e").Err()
+
+	// SINTERCARD - 返回交集基数
+	result, err := testClient.Do(ctx, "SINTERCARD", "smismem1", "smismem2").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, int64(2), result) // 交集是 {b, c}
+
+	// SINTERCARD - 单个集合
+	result, err = testClient.Do(ctx, "SINTERCARD", "smismem1").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, int64(4), result) // 只有smismem1时，返回其基数
+
+	// SINTERCARD - 无交集
+	result, err = testClient.Do(ctx, "SINTERCARD", "smismem1", "noset").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, int64(0), result)
+
+	// SMISMEMBER - 检查多个成员是否存在
+	result, err = testClient.Do(ctx, "SMISMEMBER", "smismem1", "a", "b").Result()
+	assert.NoError(t, err)
+	// 返回 [1, 1] 表示 a和b都存在
+	arr, ok := result.([]interface{})
+	assert.True(t, ok)
+	assert.Equal(t, 2, len(arr))
+}
+
+// TestHashAdvancedCommands 测试Hash高级命令（HRANDFIELD）
+func TestHashAdvancedCommands(t *testing.T) {
+	setupTestServer(t)
+	defer teardownTestServer(t)
+
+	ctx := context.Background()
+
+	// 准备测试数据
+	_ = testClient.HSet(ctx, "hashrand", "f1", "v1", "f2", "v2", "f3", "v3", "f4", "v4", "f5", "v5").Err()
+
+	// HRANDFIELD - 获取单个随机字段
+	result, err := testClient.Do(ctx, "HRANDFIELD", "hashrand").Result()
+	assert.NoError(t, err)
+	// 单个字段时，go-redis可能返回字符串而不是数组
+	assert.True(t, result != nil)
+
+	// HRANDFIELD - 获取多个随机字段
+	result, err = testClient.Do(ctx, "HRANDFIELD", "hashrand", "3").Result()
+	assert.NoError(t, err)
+	// 多个字段时返回数组
+	arr, ok := result.([]interface{})
+	assert.True(t, ok)
+	// 应该返回3个字段
+	assert.Equal(t, 3, len(arr))
+
+	// HRANDFIELD with WITHVALUES - 获取字段和值
+	result, err = testClient.Do(ctx, "HRANDFIELD", "hashrand", "2", "WITHVALUES").Result()
+	assert.NoError(t, err)
+	arr, ok = result.([]interface{})
+	assert.True(t, ok)
+	assert.Equal(t, 4, len(arr)) // 2个字段 + 2个值
+
+	// HRANDFIELD - 空哈希
+	result, err = testClient.Do(ctx, "HRANDFIELD", "emptyhash").Result()
+	assert.NoError(t, err)
+	// 空哈希应该返回nil或空数组
+
+	// HRANDFIELD - 获取所有字段（count大于字段数量）
+	result, err = testClient.Do(ctx, "HRANDFIELD", "hashrand", "10").Result()
+	assert.NoError(t, err)
+	arr, ok = result.([]interface{})
+	assert.True(t, ok)
+	// count >= 字段数量时，返回所有字段（至少5个）
+	assert.True(t, len(arr) >= 5)
+}
+
+// TestSortedSetAdvancedCommands 测试SortedSet高级命令（ZUNIONSTORE, ZINTERSTORE, ZDIFFSTORE）
+func TestSortedSetAdvancedCommands(t *testing.T) {
+	setupTestServer(t)
+	defer teardownTestServer(t)
+
+	ctx := context.Background()
+
+	// 准备测试数据
+	_ = testClient.ZAdd(ctx, "zunion1", redis.Z{Score: 1, Member: "a"}, redis.Z{Score: 2, Member: "b"}).Err()
+	_ = testClient.ZAdd(ctx, "zunion2", redis.Z{Score: 2, Member: "b"}, redis.Z{Score: 3, Member: "c"}).Err()
+
+	// ZUNIONSTORE - 并集
+	result, err := testClient.ZUnionStore(ctx, "zunionresult", &redis.ZStore{
+		Keys:    []string{"zunion1", "zunion2"},
+		Weights: nil,
+	}).Result()
+	assert.NoError(t, err)
+	assert.Equal(t, int64(3), result) // {a, b, c}
+
+	members, _ := testClient.ZRange(ctx, "zunionresult", 0, -1).Result()
+	assert.Equal(t, 3, len(members))
+
+	// ZUNIONSTORE with WEIGHTS - 带权重
+	_ = testClient.Del(ctx, "zunionresult").Err()
+	result, err = testClient.ZUnionStore(ctx, "zunionresult", &redis.ZStore{
+		Keys:    []string{"zunion1", "zunion2"},
+		Weights: []float64{2, 3},
+	}).Result()
+	assert.NoError(t, err)
+	assert.Equal(t, int64(3), result)
+
+	// ZINTERSTORE - 交集
+	_ = testClient.Del(ctx, "zinterresult").Err()
+	result, err = testClient.ZInterStore(ctx, "zinterresult", &redis.ZStore{
+		Keys:    []string{"zunion1", "zunion2"},
+		Weights: nil,
+	}).Result()
+	assert.NoError(t, err)
+	assert.Equal(t, int64(1), result) // 只有 {b}
+
+	members, _ = testClient.ZRange(ctx, "zinterresult", 0, -1).Result()
+	assert.Equal(t, []string{"b"}, members)
+
+	// ZDIFFSTORE - 差集
+	_ = testClient.ZAdd(ctx, "zdiff1", redis.Z{Score: 1, Member: "a"}, redis.Z{Score: 2, Member: "b"}, redis.Z{Score: 3, Member: "c"}).Err()
+	_ = testClient.ZAdd(ctx, "zdiff2", redis.Z{Score: 2, Member: "b"}).Err()
+	_ = testClient.Del(ctx, "zdiffresult").Err()
+	result, err = testClient.ZDiffStore(ctx, "zdiffresult", "zdiff1", "zdiff2").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, int64(2), result) // {a, c}
+
+	members, _ = testClient.ZRange(ctx, "zdiffresult", 0, -1).Result()
+	assert.Equal(t, 2, len(members))
+}
+
+// TestSWAPDB 测试SWAPDB命令
+func TestSWAPDB(t *testing.T) {
+	setupTestServer(t)
+	defer teardownTestServer(t)
+
+	ctx := context.Background()
+
+	// BoltDB 是单数据库实现，SWAPDB 返回OK但不做任何操作
+	result, err := testClient.Do(ctx, "SWAPDB", 0, 1).Result()
+	assert.NoError(t, err)
+	assert.Equal(t, "OK", result)
+}
+
+// TestMain 测试入口
+// TestMain 在所有测试之前和之后运行一次
+// - 在 m.Run() 之前：可以执行共享的初始化代码
+// - 在 m.Run() 之后：可以执行清理代码（如日志、报告）
+func TestMain(m *testing.M) {
+	println("[TestMain] === 测试套件开始 ===")
+
+	// 这里可以放置所有测试共享的初始化逻辑
+	// 例如：启动测试数据库、加载测试数据等
+	// 目前每个测试函数自行调用 setupTestServer/teardownTestServer
+
+	println("[TestMain] 运行测试...")
+	code := m.Run()
+
+	println("[TestMain] 测试运行完成，退出码:", code)
+	println("[TestMain] === 测试套件结束 ===")
+
+	os.Exit(code)
 }

@@ -1334,3 +1334,31 @@ func (s *BotreonStore) ZMScore(zSetName string, members ...string) ([]float64, e
 	}
 	return scores, nil
 }
+
+// BZPopMax 实现 Redis BZPOPMAX 命令，阻塞式弹出分数最高的成员（简化版本：非阻塞）
+func (s *BotreonStore) BZPopMax(keys []string, timeout int) (string, *ZSetMember, error) {
+	for _, key := range keys {
+		members, err := s.ZPopMax(key, 1)
+		if err != nil {
+			return "", nil, err
+		}
+		if len(members) > 0 {
+			return key, &members[0], nil
+		}
+	}
+	return "", nil, nil
+}
+
+// BZPopMin 实现 Redis BZPOPMIN 命令，阻塞式弹出分数最低的成员（简化版本：非阻塞）
+func (s *BotreonStore) BZPopMin(keys []string, timeout int) (string, *ZSetMember, error) {
+	for _, key := range keys {
+		members, err := s.ZPopMin(key, 1)
+		if err != nil {
+			return "", nil, err
+		}
+		if len(members) > 0 {
+			return key, &members[0], nil
+		}
+	}
+	return "", nil, nil
+}

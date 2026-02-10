@@ -651,3 +651,95 @@ func (s *BotreonStore) HStrLen(key, field string) (int, error) {
 	})
 	return length, err
 }
+
+// HRandField 实现 Redis HRANDFIELD 命令，随机获取哈希表中的字段
+// count: 要返回的字段数量，正数表示不重复，负数表示可以重复
+// withValues: 是否同时返回字段值
+func (s *BotreonStore) HRandField(key string, count int, withValues bool) ([]string, []string, error) {
+	var fields []string
+	var values []string
+	err := s.db.View(func(txn *badger.Txn) error {
+		// 获取所有字段
+		allFields, err := s.hGetAllFields(txn, key)
+		if err != nil {
+			return err
+		}
+		if len(allFields) == 0 {
+			return nil
+		}
+
+		// 根据 count 和 withValues 处理
+		if count > 0 && count < len(allFields) {
+			// 需要随机选择 count 个不重复的字段
+			selected := make(map[int]bool)
+			for len(selected) < count {
+				idx := int(randomFloat64() * float64(len(allFields)))
+				if !selected[idx] {
+					selected[idx] = true
+					fields = append(fields, allFields[idx].Field)
+					if withValues {
+						values = append(values, string(allFields[idx].Value))
+					}
+				}
+			}
+		} else if count < 0 {
+			// 需要随机选择 -count 个字段（可以重复）
+			realCount := -count
+			if realCount > len(allFields) {
+				realCount = len(allFields)
+			}
+			for i := 0; i < realCount; i++ {
+				idx := int(randomFloat64() * float64(len(allFields)))
+				fields = append(fields, allFields[idx].Field)
+				if withValues {
+					values = append(values, string(allFields[idx].Value))
+				}
+			}
+		} else {
+			// count >= len(allFields)，返回所有字段
+			for _, f := range allFields {
+				fields = append(fields, f.Field)
+				if withValues {
+					values = append(values, string(f.Value))
+				}
+			}
+		}
+		return nil
+	})
+	return fields, values, err
+}
+
+// hGetAllFields 获取哈希表中的所有字段（内部方法）
+func (s *BotreonStore) hGetAllFields(txn *badger.Txn, key string) ([]hashField, error) {
+	var fields []hashField
+	prefix := s.hashKey(key, "")
+	opts := badger.DefaultIteratorOptions
+	opts.Prefix = prefix
+	opts.PrefetchValues = false
+
+	it := txn.NewIterator(opts)
+	defer it.Close()
+
+	for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
+		item := it.Item()
+		k := item.Key()
+		// key格式: hash:myhash:fieldname
+		fieldName := string(k[len(prefix):])
+		var fieldValue []byte
+		err := item.Value(func(val []byte) error {
+			fieldValue = val
+			return nil
+		})
+		if err != nil {
+			return nil, err
+		}
+		fields = append(fields, hashField{Field: fieldName, Value: fieldValue})
+	}
+	return fields, nil
+}
+
+// hashField 哈希字段结构
+type hashField struct {
+	Field string
+	Value []byte
+}

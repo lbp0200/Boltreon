@@ -24,7 +24,7 @@ func TestDelString(t *testing.T) {
 	assert.Equal(t, "value", val)
 
 	// 删除
-	err = store.Del(key)
+	_, err = store.Del(key)
 	assert.NoError(t, err)
 
 	// 验证已删除
@@ -33,7 +33,7 @@ func TestDelString(t *testing.T) {
 	assert.Equal(t, "", val)
 
 	// 删除不存在的键
-	err = store.Del("nonexistent")
+	_, err = store.Del("nonexistent")
 	assert.NoError(t, err)
 }
 
@@ -54,7 +54,7 @@ func TestDelList(t *testing.T) {
 	assert.Equal(t, 3, length)
 
 	// 删除
-	err = store.Del(key)
+	_, err = store.Del(key)
 	assert.NoError(t, err)
 
 	// 验证已删除
@@ -87,7 +87,7 @@ func TestDelHash(t *testing.T) {
 	assert.Equal(t, uint64(2), count)
 
 	// 删除
-	err = store.Del(key)
+	_, err = store.Del(key)
 	assert.NoError(t, err)
 
 	// 验证已删除
@@ -118,7 +118,7 @@ func TestDelSet(t *testing.T) {
 	assert.Equal(t, uint64(3), count)
 
 	// 删除
-	err = store.Del(key)
+	_, err = store.Del(key)
 	assert.NoError(t, err)
 
 	// 验证已删除
@@ -154,7 +154,7 @@ func TestDelSortedSet(t *testing.T) {
 	assert.Equal(t, int64(3), card)
 
 	// 删除
-	err = store.Del(key)
+	_, err = store.Del(key)
 	assert.NoError(t, err)
 
 	// 验证已删除
@@ -180,7 +180,7 @@ func TestDelNonExistentKey(t *testing.T) {
 	defer store.Close()
 
 	// 删除不存在的键应该成功（不报错）
-	err := store.Del("nonexistent")
+	_, err := store.Del("nonexistent")
 	assert.NoError(t, err)
 }
 
@@ -196,7 +196,7 @@ func TestDelAfterMultipleOperations(t *testing.T) {
 	assert.NoError(t, err)
 
 	// 删除
-	err = store.Del(key)
+	_, err = store.Del(key)
 	assert.NoError(t, err)
 
 	// 再设置为列表
@@ -209,7 +209,7 @@ func TestDelAfterMultipleOperations(t *testing.T) {
 	assert.Equal(t, 1, length)
 
 	// 再次删除
-	err = store.Del(key)
+	_, err = store.Del(key)
 	assert.NoError(t, err)
 
 	// 验证已删除
@@ -340,7 +340,7 @@ func TestDelAllTypes(t *testing.T) {
 			assert.NoError(t, err)
 
 			// 删除
-			err = store.Del(key)
+			_, err = store.Del(key)
 			assert.NoError(t, err)
 
 			// 验证已删除
@@ -368,7 +368,7 @@ func TestDelLargeDataset(t *testing.T) {
 	assert.Equal(t, uint64(100), count)
 
 	// 删除
-	err = store.Del(key)
+	_, err = store.Del(key)
 	assert.NoError(t, err)
 
 	// 验证所有数据都已删除
@@ -406,7 +406,7 @@ func TestDelComplexSortedSet(t *testing.T) {
 	assert.Equal(t, int64(50), card)
 
 	// 删除
-	err = store.Del(key)
+	_, err = store.Del(key)
 	assert.NoError(t, err)
 
 	// 验证所有数据都已删除
@@ -445,7 +445,7 @@ func TestExists(t *testing.T) {
 	assert.True(t, exists)
 
 	// 删除键
-	_ = store.Del(key)
+	_, _ = store.Del(key)
 	exists, err = store.Exists(key)
 	assert.NoError(t, err)
 	assert.False(t, exists)
