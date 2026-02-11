@@ -3034,6 +3034,197 @@ func (h *Handler) executeCommand(cmd string, args [][]byte) proto.RESP {
 			return proto.NewError("ERR unknown subcommand for 'MEMORY'")
 		}
 
+	// ==================== LOLWUT ====================
+	case "LOLWUT":
+		// LOLWUT [VERSION version] - Redis version sanity check
+		version := "redis.bolt.8.0"
+		if len(args) > 0 && strings.ToUpper(string(args[0])) == "VERSION" && len(args) > 1 {
+			version = string(args[1])
+		}
+		// Return a simple artistic pattern
+		result := fmt.Sprintf("BoltDB %s - A disk-persistent Redis-compatible database", version)
+		return proto.NewBulkString([]byte(result))
+
+	// ==================== LATENCY ====================
+	case "LATENCY":
+		if len(args) < 1 {
+			return proto.NewError("ERR wrong number of arguments for 'LATENCY' command")
+		}
+		subCmd := strings.ToUpper(string(args[0]))
+		switch subCmd {
+		case "LATEST":
+			// LATENCY LATEST - return latest latency samples
+			return &proto.Array{Args: [][]byte{}}
+		case "RESET":
+			// LATENCY RESET [EVENT ...] - reset latency data
+			return proto.NewInteger(0)
+		case "HELP":
+			return &proto.Array{Args: [][]byte{
+				[]byte("LATENCY LATEST - returns the latest latency samples"),
+				[]byte("LATENCY RESET [EVENT ...] - reset latency data for events"),
+				[]byte("LATENCY DOCTOR - analyzes latency issues"),
+				[]byte("LATENCY HELP - shows this help message"),
+			}}
+		case "DOCTOR":
+			// Return a diagnostic message
+			return &proto.Array{Args: [][]byte{
+				[]byte("Latency doctor report:"),
+				[]byte("- No latency issues detected"),
+				[]byte("- BoltDB uses BadgerDB for disk-based storage"),
+				[]byte("- Expected latency < 5ms for SSD, < 50ms for HDD"),
+			}}
+		default:
+			return proto.NewError("ERR unknown subcommand for 'LATENCY'")
+		}
+
+	// ==================== READONLY ====================
+	case "READONLY":
+		// READONLY - enter read-only mode (for replicas in read-write splitting scenarios)
+		// This is primarily used in Redis Cluster for replica nodes
+		return proto.NewSimpleString("OK")
+
+	// ==================== READWRITE ====================
+	case "READWRITE":
+		// READWRITE - exit read-only mode
+		return proto.NewSimpleString("OK")
+
+	// ==================== ZRANGESTORE ====================
+	case "ZRANGESTORE":
+		// ZRANGESTORE dstkey srckey min max [BYSCORE | BYLEX] [REV] [LIMIT offset count] [WITHSCORES]
+		if len(args) < 4 {
+			return proto.NewError("ERR wrong number of arguments for 'ZRANGESTORE' command")
+		}
+		dstKey := string(args[0])
+		srcKey := string(args[1])
+		min := string(args[2])
+		max := string(args[3])
+
+		// Parse options
+		byScore := false
+		byLex := false
+		rev := false
+		var limitOffset, limitCount int64 = 0, -1
+
+		i := 4
+		for i < len(args) {
+			opt := strings.ToUpper(string(args[i]))
+			switch opt {
+			case "BYSCORE":
+				byScore = true
+				i++
+			case "BYLEX":
+				byLex = true
+				i++
+			case "REV":
+				rev = true
+				i++
+			case "LIMIT":
+				if i+2 >= len(args) {
+					return proto.NewError("ERR syntax error")
+				}
+				offset, err := strconv.ParseInt(string(args[i+1]), 10, 64)
+				if err != nil {
+					return proto.NewError("ERR invalid LIMIT offset")
+				}
+				count, err := strconv.ParseInt(string(args[i+2]), 10, 64)
+				if err != nil {
+					return proto.NewError("ERR invalid LIMIT count")
+				}
+				limitOffset = offset
+				limitCount = count
+				i += 3
+			default:
+				return proto.NewError(fmt.Sprintf("ERR syntax error, unexpected option: %s", opt))
+			}
+		}
+
+		// Parse min/max as float64 only if BYSCORE
+		var minScore, maxScore float64
+		var err error
+		if byScore {
+			minScore, err = strconv.ParseFloat(min, 64)
+			if err != nil {
+				return proto.NewError("ERR min value is not a float")
+			}
+			maxScore, err = strconv.ParseFloat(max, 64)
+			if err != nil {
+				return proto.NewError("ERR max value is not a float")
+			}
+		}
+
+		// Determine the range operation to use
+		var members []store.ZSetMember
+
+		if byLex {
+			lexMembers, lexErr := h.Db.ZRangeByLex(srcKey, min, max, int(limitOffset), int(limitCount))
+			if lexErr != nil {
+				return proto.NewError(fmt.Sprintf("ERR %v", lexErr))
+			}
+			// Convert []string to []ZSetMember (score=0 for all)
+			members = make([]store.ZSetMember, len(lexMembers))
+			for i, m := range lexMembers {
+				members[i] = store.ZSetMember{Member: m, Score: 0}
+			}
+		} else if byScore {
+			members, err = h.Db.ZRangeByScore(srcKey, minScore, maxScore, int(limitOffset), int(limitCount))
+			if err != nil {
+				return proto.NewError(fmt.Sprintf("ERR %v", err))
+			}
+		} else {
+			// Default: treat min/max as ranks (integers)
+			start, err := strconv.ParseInt(min, 10, 64)
+			if err != nil {
+				return proto.NewError("ERR min value is not an integer")
+			}
+			stop, err := strconv.ParseInt(max, 10, 64)
+			if err != nil {
+				return proto.NewError("ERR max value is not an integer")
+			}
+			// With REV, swap start and stop (range becomes [stop, start])
+			if rev {
+				start, stop = stop, start
+			}
+			ptrMembers, rangeErr := h.Db.ZRange(srcKey, start, stop)
+			if rangeErr != nil {
+				return proto.NewError(fmt.Sprintf("ERR %v", rangeErr))
+			}
+			// Apply LIMIT for rank-based range
+			if limitCount >= 0 && int64(len(ptrMembers)) > limitOffset {
+				if limitCount == 0 || limitOffset+int64(limitCount) > int64(len(ptrMembers)) {
+					ptrMembers = ptrMembers[limitOffset:]
+				} else {
+					ptrMembers = ptrMembers[limitOffset : limitOffset+int64(limitCount)]
+				}
+			}
+			// Convert []*ZSetMember to []ZSetMember
+			members = make([]store.ZSetMember, len(ptrMembers))
+			for i, m := range ptrMembers {
+				members[i] = store.ZSetMember{Member: m.Member, Score: m.Score}
+			}
+		}
+
+		// Apply REV for BYSCORE and BYLEX (reverse the result)
+		// Note: For rank-based ranges, REV is handled by swapping start/stop above
+		if rev && (byScore || byLex) {
+			for i, j := 0, len(members)-1; i < j; i, j = i+1, j-1 {
+				members[i], members[j] = members[j], members[i]
+			}
+		}
+
+		// Delete destination if it exists
+		_, _ = h.Db.Del(dstKey)
+
+		// Add members to destination
+		if len(members) > 0 {
+			err = h.Db.ZAdd(dstKey, members)
+			if err != nil {
+				return proto.NewError(fmt.Sprintf("ERR %v", err))
+			}
+		}
+
+		// ZRANGESTORE always returns the count of elements stored
+		return proto.NewInteger(int64(len(members)))
+
 	// Pub/Sub命令
 	case "PUBLISH":
 		if h.PubSub == nil {

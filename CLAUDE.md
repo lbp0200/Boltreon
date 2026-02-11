@@ -10,10 +10,10 @@ BoltDB is a disk-persistent Redis-compatible database written in Go, using Badge
 
 ```bash
 # Build and run development server
-go run cmd/boltDB/main.go -dir=./data
+go run cmd/boltDB/main.go -dir=/tmp/bolt_db_data
 
 # Build binary
-go build -o boltDB cmd/boltDB/main.go
+go build -o ./build/boltDB cmd/boltDB/main.go
 
 # Run all tests
 go test ./...

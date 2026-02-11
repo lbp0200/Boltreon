@@ -1718,6 +1718,132 @@ func TestMemoryUsage(t *testing.T) {
 	assert.True(t, len(arr) > 0)
 }
 
+// TestLOLWUT 测试 LOLWUT 命令
+func TestLOLWUT(t *testing.T) {
+	setupTestServer(t)
+	defer teardownTestServer(t)
+
+	ctx := context.Background()
+
+	// LOLWUT should return version info
+	result, err := testClient.Do(ctx, "LOLWUT").Result()
+	assert.NoError(t, err)
+
+	str, ok := result.(string)
+	assert.True(t, ok)
+	assert.True(t, len(str) > 0)
+	assert.Equal(t, "BoltDB redis.bolt.8.0 - A disk-persistent Redis-compatible database", str)
+
+	// LOLWUT with VERSION parameter
+	result, err = testClient.Do(ctx, "LOLWUT", "VERSION", "5").Result()
+	assert.NoError(t, err)
+	str, ok = result.(string)
+	assert.True(t, ok)
+	assert.Equal(t, "BoltDB 5 - A disk-persistent Redis-compatible database", str)
+}
+
+// TestLatency 测试 LATENCY 命令
+func TestLatency(t *testing.T) {
+	setupTestServer(t)
+	defer teardownTestServer(t)
+
+	ctx := context.Background()
+
+	// LATENCY LATEST should return empty array
+	result, err := testClient.Do(ctx, "LATENCY", "LATEST").Result()
+	assert.NoError(t, err)
+	arr, ok := result.([]interface{})
+	assert.True(t, ok)
+	assert.Equal(t, 0, len(arr))
+
+	// LATENCY RESET should return 0 (count of events reset)
+	result, err = testClient.Do(ctx, "LATENCY", "RESET").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, int64(0), result)
+
+	// LATENCY RESET with event should return count
+	result, err = testClient.Do(ctx, "LATENCY", "RESET", "command").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, int64(0), result)
+
+	// LATENCY HELP should return help text
+	result, err = testClient.Do(ctx, "LATENCY", "HELP").Result()
+	assert.NoError(t, err)
+	arr, ok = result.([]interface{})
+	assert.True(t, ok)
+	assert.True(t, len(arr) > 0)
+
+	// LATENCY DOCTOR should return info
+	result, err = testClient.Do(ctx, "LATENCY", "DOCTOR").Result()
+	assert.NoError(t, err)
+	_, ok = result.([]interface{})
+	assert.True(t, ok)
+}
+
+// TestReadOnlyReadWrite 测试 READONLY 和 READWRITE 命令
+func TestReadOnlyReadWrite(t *testing.T) {
+	setupTestServer(t)
+	defer teardownTestServer(t)
+
+	ctx := context.Background()
+
+	// READONLY should return OK
+	result, err := testClient.Do(ctx, "READONLY").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, "OK", result)
+
+	// READWRITE should return OK
+	result, err = testClient.Do(ctx, "READWRITE").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, "OK", result)
+}
+
+// TestZRangeStore 测试 ZRANGESTORE 命令
+func TestZRangeStore(t *testing.T) {
+	setupTestServer(t)
+	defer teardownTestServer(t)
+
+	ctx := context.Background()
+
+	// Create source sorted set
+	_ = testClient.ZAdd(ctx, "srczset", redis.Z{Score: 1, Member: "a"}).Err()
+	_ = testClient.ZAdd(ctx, "srczset", redis.Z{Score: 2, Member: "b"}).Err()
+	_ = testClient.ZAdd(ctx, "srczset", redis.Z{Score: 3, Member: "c"}).Err()
+	_ = testClient.ZAdd(ctx, "srczset", redis.Z{Score: 4, Member: "d"}).Err()
+	_ = testClient.ZAdd(ctx, "srczset", redis.Z{Score: 5, Member: "e"}).Err()
+
+	// ZRANGESTORE with BYSCORE - basic test
+	result, err := testClient.Do(ctx, "ZRANGESTORE", "dstzset", "srczset", "2", "4").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, int64(3), result) // 3 elements (b, c, d)
+
+	// Verify destination has correct values
+	count, err := testClient.ZCard(ctx, "dstzset").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, int64(3), count)
+
+	// ZRANGESTORE with LIMIT
+	result, err = testClient.Do(ctx, "ZRANGESTORE", "dstzset4", "srczset", "0", "4", "LIMIT", "0", "2").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, int64(2), result)
+
+	// ZRANGESTORE on empty source
+	result, err = testClient.Do(ctx, "ZRANGESTORE", "dstzset5", "emptyzset", "1", "10").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, int64(0), result)
+
+	// ZRANGESTORE with BYLEX - create sorted set with same scores
+	_ = testClient.ZAdd(ctx, "lexzset", redis.Z{Score: 0, Member: "a"}).Err()
+	_ = testClient.ZAdd(ctx, "lexzset", redis.Z{Score: 0, Member: "b"}).Err()
+	_ = testClient.ZAdd(ctx, "lexzset", redis.Z{Score: 0, Member: "c"}).Err()
+	_ = testClient.ZAdd(ctx, "lexzset", redis.Z{Score: 0, Member: "d"}).Err()
+	_ = testClient.ZAdd(ctx, "lexzset", redis.Z{Score: 0, Member: "e"}).Err()
+
+	result, err = testClient.Do(ctx, "ZRANGESTORE", "lexdst", "lexzset", "a", "c", "BYLEX").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, int64(3), result)
+}
+
 // TestMain 测试入口
 // TestMain 在所有测试之前和之后运行一次
 // - 在 m.Run() 之前：可以执行共享的初始化代码

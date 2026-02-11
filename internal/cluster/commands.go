@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 // ClusterCommands 处理CLUSTER命令
@@ -58,6 +59,14 @@ func (cc *ClusterCommands) HandleCommand(args []string) (interface{}, error) {
 		return cc.handleMyID(subArgs)
 	case "EPOCH":
 		return cc.handleEpoch(subArgs)
+	case "SLAVES":
+		return cc.handleSlaves(subArgs)
+	case "RESET":
+		return cc.handleReset(subArgs)
+	case "CALLS":
+		return cc.handleCalls(subArgs)
+	case "TOTALKEYS":
+		return cc.handleTotalKeys(subArgs)
 	default:
 		return nil, fmt.Errorf("ERR unknown subcommand '%s'", subcommand)
 	}
@@ -353,5 +362,135 @@ func (cc *ClusterCommands) handleMyID(args []string) (string, error) {
 // handleEpoch 处理CLUSTER EPOCH命令
 func (cc *ClusterCommands) handleEpoch(args []string) (int64, error) {
 	return cc.cluster.GetEpoch(), nil
+}
+
+// handleSlaves 处理CLUSTER SLAVES命令
+func (cc *ClusterCommands) handleSlaves(args []string) ([]string, error) {
+	if len(args) < 1 {
+		return nil, fmt.Errorf("ERR wrong number of arguments for 'CLUSTER SLAVES' command")
+	}
+
+	nodeID := args[0]
+	master := cc.cluster.GetNodeByID(nodeID)
+	if master == nil {
+		return nil, fmt.Errorf("ERR No such node %s", nodeID)
+	}
+
+	// 获取所有slave节点
+	var slaves []string
+	for _, node := range cc.cluster.Nodes {
+		if node.MasterID == nodeID {
+			line := cc.cluster.formatNodeLine(node)
+			slaves = append(slaves, line)
+		}
+	}
+
+	return slaves, nil
+}
+
+// handleReset 处理CLUSTER RESET命令
+func (cc *ClusterCommands) handleReset(args []string) (string, error) {
+	// 默认使用SOFT重置
+	hard := false
+	for _, arg := range args {
+		if strings.ToUpper(arg) == "HARD" {
+			hard = true
+		}
+	}
+
+	cc.cluster.mu.Lock()
+	defer cc.cluster.mu.Unlock()
+
+	// 清除所有节点（除了自己）
+	cc.cluster.Nodes = make(map[string]*Node)
+	cc.cluster.Nodes[cc.cluster.Myself.ID] = cc.cluster.Myself
+
+	// 重置槽位分配
+	if hard {
+		// HARD: 清除所有槽位
+		for i := uint32(0); i < SlotCount; i++ {
+			cc.cluster.Slots[i] = nil
+		}
+		cc.cluster.Myself.Slots = []SlotRange{}
+	} else {
+		// SOFT: 保留当前节点的槽位
+		for i := uint32(0); i < SlotCount; i++ {
+			if cc.cluster.Slots[i] != cc.cluster.Myself {
+				cc.cluster.Slots[i] = nil
+			}
+		}
+		// 重新计算自己的槽位范围
+		var mySlots []uint32
+		for i := uint32(0); i < SlotCount; i++ {
+			if cc.cluster.Slots[i] == cc.cluster.Myself {
+				mySlots = append(mySlots, i)
+			}
+		}
+		ranges := mergeConsecutiveSlots(mySlots)
+		cc.cluster.Myself.Slots = ranges
+	}
+
+	// 重置节点状态
+	cc.cluster.Myself.MasterID = ""
+	cc.cluster.Myself.Flags = []string{"master", "myself"}
+
+	// 增加纪元
+	cc.cluster.Epoch++
+
+	return "OK", nil
+}
+
+// clusterStats 用于存储集群调用统计
+type clusterStats struct {
+	CommandsProcessed int64
+	NetInputBytes    int64
+	NetOutputBytes   int64
+	mu               sync.RWMutex
+}
+
+var globalClusterStats = &clusterStats{
+	CommandsProcessed: 0,
+	NetInputBytes:    0,
+	NetOutputBytes:    0,
+}
+
+// handleCalls 处理CLUSTER CALLS命令
+func (cc *ClusterCommands) handleCalls(args []string) ([]interface{}, error) {
+	globalClusterStats.mu.RLock()
+	defer globalClusterStats.mu.RUnlock()
+
+	// 返回集群调用统计信息
+	// 格式: [nodename, num_commands, num_bytes_received, num_bytes_sent, ...]
+	result := make([]interface{}, 0, 4*len(cc.cluster.Nodes))
+
+	for _, node := range cc.cluster.Nodes {
+		result = append(result, node.ID)
+		result = append(result, globalClusterStats.CommandsProcessed)
+		result = append(result, globalClusterStats.NetInputBytes)
+		result = append(result, globalClusterStats.NetOutputBytes)
+	}
+
+	return result, nil
+}
+
+// handleTotalKeys 处理CLUSTER TOTALKEYS命令
+func (cc *ClusterCommands) handleTotalKeys(args []string) (int64, error) {
+	if len(args) < 1 {
+		return 0, fmt.Errorf("ERR wrong number of arguments for 'CLUSTER TOTALKEYS' command")
+	}
+
+	slot, err := strconv.ParseUint(args[0], 10, 32)
+	if err != nil {
+		return 0, fmt.Errorf("ERR invalid slot number")
+	}
+
+	if slot >= uint64(SlotCount) {
+		return 0, fmt.Errorf("ERR slot out of range")
+	}
+
+	// 简化实现：返回0
+	// 实际需要扫描整个数据库，统计属于该槽位的键数量
+	// 由于BoltDB/BadgerDB的键不存储槽位信息，这里无法准确统计
+	return 0, nil
 }
 
