@@ -92,8 +92,9 @@ func (h *HyperLogLog) countZeros() int {
 
 // add 添加元素，返回是否发生了变化
 func (h *HyperLogLog) add(data []byte) bool {
-	if h.encoding == 0 {
-		h.encoding = 2 // 初始化为密集编码
+	// 初始化寄存器（如果尚未初始化）
+	if len(h.registers) == 0 {
+		h.encoding = 2 // 使用密集编码
 		h.registers = make([]byte, hllRegisterCount)
 	}
 
@@ -417,8 +418,9 @@ func (s *BotreonStore) PFInfo(key string) (map[string]int64, error) {
 			registers: val[1:],
 		}
 
-		info["estimated"] = int64(math.Round(hll.Estimate()))
-		info["registers"] = int64(len(hll.registers))
+		info["encoding"] = int64(hll.encoding)
+		info["card"] = int64(math.Round(hll.Estimate()))
+		info["size"] = int64(len(val))
 		return nil
 	})
 

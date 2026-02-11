@@ -35,8 +35,11 @@ func setupTestServer(t *testing.T) {
 		t.Fatalf("Failed to create store: %v", err)
 	}
 
+	// 创建PubSub管理器
+	pubsubMgr := store.NewPubSubManager()
+
 	// 创建服务器处理器
-	testServer = &server.Handler{Db: testDB}
+	testServer = &server.Handler{Db: testDB, PubSub: pubsubMgr}
 
 	// 启动服务器（使用随机端口）
 	listener, err = net.Listen("tcp", "127.0.0.1:0")

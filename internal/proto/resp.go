@@ -226,6 +226,39 @@ func joinBulkStrings(args [][]byte) string {
 	return b.String()
 }
 
+// RawString 用于直接返回RESP格式的字符串
+type RawString string
+
+func (r RawString) String() string {
+	return string(r)
+}
+
+// NewScanResponse 创建SCAN命令的响应格式 [cursor, [keys...]]
+func NewScanResponse(cursor uint64, keys []string) RESP {
+	var b strings.Builder
+	// 外层数组: 2个元素 (cursor, keys数组)
+	b.WriteString("*2\r\n")
+	// cursor 作为 bulk string
+	cursorStr := strconv.FormatUint(cursor, 10)
+	b.WriteString("$")
+	b.WriteString(strconv.Itoa(len(cursorStr)))
+	b.WriteString("\r\n")
+	b.WriteString(cursorStr)
+	b.WriteString("\r\n")
+	// keys 数组
+	b.WriteString("*")
+	b.WriteString(strconv.Itoa(len(keys)))
+	b.WriteString("\r\n")
+	for _, key := range keys {
+		b.WriteString("$")
+		b.WriteString(strconv.Itoa(len(key)))
+		b.WriteString("\r\n")
+		b.WriteString(key)
+		b.WriteString("\r\n")
+	}
+	return RawString(b.String())
+}
+
 // 工厂
 func NewSimpleString(s string) RESP { r := SimpleString(s); return &r }
 func NewBulkString(b []byte) RESP {

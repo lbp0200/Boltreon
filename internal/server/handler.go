@@ -839,22 +839,68 @@ func (h *Handler) executeCommand(cmd string, args [][]byte, remoteAddr string) p
 		if err != nil {
 			return proto.NewError(fmt.Sprintf("ERR %v", err))
 		}
-		// Convert results to RESP array
+		// Single operation returns integer, multiple operations return array
+		if len(results) == 1 {
+			switch v := results[0].(type) {
+			case int64:
+				return proto.NewInteger(v)
+			case []interface{}:
+				// Overflow case
+				return proto.NewError(fmt.Sprintf("ERR overflow: %v", v))
+			}
+		}
+		// Convert results to RESP array for multiple operations
 		respArgs := make([][]byte, len(results))
 		for i, r := range results {
-			switch val := r.(type) {
+			switch v := r.(type) {
 			case int64:
-				respArgs[i] = []byte(strconv.FormatInt(val, 10))
+				respArgs[i] = []byte(strconv.FormatInt(v, 10))
 			case []interface{}:
-				// Overflow case: [value, overflow_type]
-				var b strings.Builder
-				b.WriteString(strconv.FormatInt(val[0].(int64), 10))
-				b.WriteString(":")
-				b.WriteString(val[1].(string))
-				respArgs[i] = []byte(b.String())
+				respArgs[i] = []byte(fmt.Sprintf("%v:%v", v[0], v[1]))
 			}
 		}
 		return &proto.Array{Args: respArgs}
+
+	case "BITPOS":
+		// BITPOS key bit [start [end [BYTE | BIT]]]
+		if len(args) < 2 {
+			return proto.NewError("ERR wrong number of arguments for 'BITPOS' command")
+		}
+		key := string(args[0])
+		bit, err := strconv.Atoi(string(args[1]))
+		if err != nil {
+			return proto.NewError("ERR value is not an integer or out of range")
+		}
+		start, end := 0, -1
+		if len(args) >= 3 {
+			start, err = strconv.Atoi(string(args[2]))
+			if err != nil {
+				return proto.NewError("ERR value is not an integer or out of range")
+			}
+		}
+		if len(args) >= 4 {
+			end, err = strconv.Atoi(string(args[3]))
+			if err != nil {
+				return proto.NewError("ERR value is not an integer or out of range")
+			}
+		}
+		pos, err := h.Db.BitPos(key, bit, start, end)
+		if err != nil {
+			return proto.NewError(fmt.Sprintf("ERR %v", err))
+		}
+		return proto.NewInteger(int64(pos))
+
+	case "BITLEN":
+		// BITLEN key
+		if len(args) < 1 {
+			return proto.NewError("ERR wrong number of arguments for 'BITLEN' command")
+		}
+		key := string(args[0])
+		length, err := h.Db.BitLen(key)
+		if err != nil {
+			return proto.NewError(fmt.Sprintf("ERR %v", err))
+		}
+		return proto.NewInteger(int64(length))
 
 	case "GETRANGE":
 		if len(args) < 3 {
@@ -990,6 +1036,26 @@ func (h *Handler) executeCommand(cmd string, args [][]byte, remoteAddr string) p
 			return proto.NewError(fmt.Sprintf("ERR %v", err))
 		}
 		return proto.OK
+
+	case "PFINFO":
+		if len(args) < 1 {
+			return proto.NewError("ERR wrong number of arguments for 'PFINFO' command")
+		}
+		key := string(args[0])
+		// 检查集群重定向
+		if resp := h.checkAndHandleRedirect(key); resp != nil {
+			return resp
+		}
+		info, err := h.Db.PFInfo(key)
+		if err != nil {
+			return proto.NewError(fmt.Sprintf("ERR %v", err))
+		}
+		// 返回数组格式: [key1, value1, key2, value2, ...]
+		result := make([][]byte, 0, len(info)*2)
+		for k, v := range info {
+			result = append(result, []byte(k), []byte(strconv.FormatInt(v, 10)))
+		}
+		return &proto.Array{Args: result}
 
 	case "TYPE":
 		if len(args) < 1 {
@@ -1327,20 +1393,8 @@ func (h *Handler) executeCommand(cmd string, args [][]byte, remoteAddr string) p
 		if err != nil {
 			return proto.NewError(fmt.Sprintf("ERR %v", err))
 		}
-		// SCAN返回格式: *2\r\n$1\r\n0\r\n*2\r\n$3\r\nkey1\r\n$3\r\nkey2\r\n
-		// 由于当前Array不支持嵌套，我们返回简化的格式
-		// 实际使用时需要客户端适配，或者扩展proto包支持嵌套数组
-		keys := make([][]byte, len(result.Keys))
-		for i, k := range result.Keys {
-			keys[i] = []byte(k)
-		}
-		// 返回游标和键数组（简化版本，不嵌套）
-		response := make([][]byte, 1+len(keys))
-		response[0] = []byte(strconv.FormatUint(result.Cursor, 10))
-		if len(keys) > 0 {
-			copy(response[1:], keys)
-		}
-		return &proto.Array{Args: response}
+		// 返回嵌套数组格式: [cursor, [key1, key2, ...]]
+		return proto.NewScanResponse(result.Cursor, result.Keys)
 
 	case "RANDOMKEY":
 		key, err := h.Db.RandomKey()
@@ -3600,6 +3654,16 @@ func (h *Handler) executeCommand(cmd string, args [][]byte, remoteAddr string) p
 				results = append(results, []byte(channel), []byte(strconv.FormatInt(int64(count), 10)))
 			}
 			return &proto.Array{Args: results}
+		case "NUMPAT":
+			count := h.PubSub.GetPatternCount()
+			return proto.NewInteger(int64(count))
+		case "HELP":
+			return &proto.Array{Args: [][]byte{
+				[]byte("PUBSUB CHANNELS [pattern]  -- Return the list of active channels matching a pattern."),
+				[]byte("PUBSUB NUMSUB [channel ...] -- Return the number of subscribers for the specified channels."),
+				[]byte("PUBSUB NUMPAT              -- Return the number of subscriptions to patterns."),
+				[]byte("PUBSUB HELP                -- Show helpful text about this subcommand."),
+			}}
 		default:
 			return proto.NewError(fmt.Sprintf("ERR unknown subcommand '%s'", subcommand))
 		}

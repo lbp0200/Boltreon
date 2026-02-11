@@ -733,6 +733,20 @@ func (s *BotreonStore) BitPos(key string, bit int, start, end int) (int, error) 
 	return pos, err
 }
 
+// BitLen 实现 Redis BITLEN 命令，获取字符串的位长度
+func (s *BotreonStore) BitLen(key string) (int, error) {
+	var length int
+	err := s.db.View(func(txn *badger.Txn) error {
+		data, err := s.getStringBytes(txn, key)
+		if err != nil {
+			return err
+		}
+		length = len(data) * 8
+		return nil
+	})
+	return length, err
+}
+
 // BitFieldResult represents the result of a BITFIELD operation
 type BitFieldResult struct {
 	Value int64 // The result value (nil if overflow)
@@ -781,16 +795,24 @@ func (s *BotreonStore) BitField(key string, operations []string) ([]interface{},
 
 	ops := make([]operation, 0, len(operations))
 	for i := 0; i < len(operations); {
-		opType := operations[i]
+		opName := operations[i]
 		i++
 
 		if i >= len(operations) {
-			return nil, fmt.Errorf("BITFIELD: missing arguments for %s", opType)
+			return nil, fmt.Errorf("BITFIELD: missing arguments for %s", opName)
 		}
 
-		isSigned, bits, err := parseBitFieldType(opType)
+		// Next argument should be the type (e.g., "u8", "i16")
+		typeStr := operations[i]
+		i++
+
+		isSigned, bits, err := parseBitFieldType(typeStr)
 		if err != nil {
 			return nil, err
+		}
+
+		if i >= len(operations) {
+			return nil, fmt.Errorf("BITFIELD: missing offset for %s %s", opName, typeStr)
 		}
 
 		offsetStr := operations[i]
@@ -802,9 +824,9 @@ func (s *BotreonStore) BitField(key string, operations []string) ([]interface{},
 		}
 
 		var value int64 = 0
-		if opType == "SET" || opType == "INCRBY" {
+		if opName == "SET" || opName == "INCRBY" {
 			if i >= len(operations) {
-				return nil, fmt.Errorf("BITFIELD: missing value for SET/INCRBY")
+				return nil, fmt.Errorf("BITFIELD: missing value for %s %s", opName, typeStr)
 			}
 			valueStr := operations[i]
 			i++
@@ -815,7 +837,7 @@ func (s *BotreonStore) BitField(key string, operations []string) ([]interface{},
 		}
 
 		ops = append(ops, operation{
-			op: opType,
+			op: opName,
 			isSigned: isSigned,
 			bits: bits,
 			offset: offset,
@@ -904,32 +926,29 @@ func (s *BotreonStore) BitField(key string, operations []string) ([]interface{},
 				results = append(results, resultValue)
 			case "INCRBY":
 				// Calculate new value with overflow handling
+				// Default overflow mode is WRAP (wrap around)
 				newValue := extractedValue + op.value
 
-				// Check overflow
-				var overflow string
+				// For WRAP mode (default), wrap around
 				if op.isSigned {
-					maxVal := int64(1)<<uint(op.bits-1) - 1
-					minVal := -int64(1)<<uint(op.bits-1) + 1 // Changed from -1<<63 to avoid overflow
-					// Adjust minVal to be within range
-					if op.bits == 64 {
-						minVal = -int64(1) << 63
+					// Signed wrap around (modulo 2^N)
+					bits := op.bits
+					if bits < 64 {
+						mod := int64(1) << uint(bits)
+						newValue = newValue % mod
+						if newValue >= int64(1)<<uint(bits-1) {
+							newValue -= mod
+						}
 					}
-					if newValue > maxVal {
-						newValue = maxVal
-						overflow = "sat"
-					} else if newValue < minVal {
-						newValue = minVal
-						overflow = "sat"
-					}
+					// For 64-bit, Go's int64 already wraps
 				} else {
 					maxVal := int64(1)<<uint(op.bits) - 1
+					// For unsigned, wrap around naturally (modulo behavior)
 					if newValue > maxVal {
-						newValue = 0
-						overflow = "sat"
+						newValue = newValue % (maxVal + 1)
 					} else if newValue < 0 {
-						newValue = maxVal
-						overflow = "sat"
+						// For negative values, wrap to positive
+						newValue = (maxVal + 1) - ((-newValue - 1) % (maxVal + 1))
 					}
 				}
 
@@ -945,12 +964,7 @@ func (s *BotreonStore) BitField(key string, operations []string) ([]interface{},
 						data[currentByteIndex] &^= (1 << (7 - currentBitIndex))
 					}
 				}
-				resultValue = newValue
-				if overflow != "" {
-					results = append(results, []interface{}{resultValue, overflow})
-				} else {
-					results = append(results, resultValue)
-				}
+				results = append(results, newValue)
 			}
 
 			// Update TTL if needed

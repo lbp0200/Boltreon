@@ -283,3 +283,17 @@ func (psm *PubSubManager) GetChannels(pattern string) []string {
 	}
 	return channels
 }
+
+// GetPatternCount 获取模式订阅数量
+func (psm *PubSubManager) GetPatternCount() int {
+	psm.mu.RLock()
+	defer psm.mu.RUnlock()
+
+	count := 0
+	for sub := range psm.subscribers {
+		sub.mu.RLock()
+		count += len(sub.Patterns)
+		sub.mu.RUnlock()
+	}
+	return count
+}
