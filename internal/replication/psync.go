@@ -2,6 +2,7 @@ package replication
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/lbp0200/BoltDB/internal/logger"
@@ -194,8 +195,10 @@ func StartSlaveReplication(rm *ReplicationManager, store *store.BotreonStore, ma
 			parts := strings.Fields(respStr)
 			if len(parts) >= 3 {
 				newReplId := parts[1]
+				offset, _ := strconv.ParseInt(parts[2], 10, 64)
 				rm.mu.Lock()
 				rm.replId = newReplId
+				rm.masterReplOffset = offset
 				rm.mu.Unlock()
 			}
 
@@ -210,8 +213,12 @@ func StartSlaveReplication(rm *ReplicationManager, store *store.BotreonStore, ma
 				Int("rdb_size", len(rdbData)).
 				Msg("收到RDB数据，开始加载")
 
-			// 加载RDB数据（简化实现，实际应该解析RDB）
-			// 这里暂时跳过，后续可以实现RDB解析
+			// 加载RDB数据
+			if err := rm.LoadRDB(rdbData); err != nil {
+				logger.Logger.Error().Err(err).Msg("加载RDB数据失败")
+			}
+
+			logger.Logger.Info().Msg("RDB数据加载完成，开始接收命令流")
 
 		} else if strings.HasPrefix(respStr, "+CONTINUE") {
 			// 增量同步

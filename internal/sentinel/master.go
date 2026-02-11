@@ -20,19 +20,25 @@ type MasterInstance struct {
 	lastPongTime  time.Time
 	downAfter     time.Duration
 	stopCh        chan struct{}
+	// 主观下线计数
+	sdownCount int
+	// 已知哨兵数量
+	knownSentinelCount int
 }
 
 // NewMasterInstance 创建新的主节点实例
 func NewMasterInstance(name, addr string, quorum int) *MasterInstance {
 	return &MasterInstance{
-		name:      name,
-		addr:      addr,
-		quorum:    quorum,
-		slaves:    make([]*SlaveInstance, 0),
-		sentinels: make([]*SentinelInstance, 0),
-		state:     "ok",
-		downAfter: 30 * time.Second,
-		stopCh:    make(chan struct{}),
+		name:               name,
+		addr:               addr,
+		quorum:             quorum,
+		slaves:             make([]*SlaveInstance, 0),
+		sentinels:          make([]*SentinelInstance, 0),
+		state:              "ok",
+		downAfter:          30 * time.Second,
+		stopCh:             make(chan struct{}),
+		sdownCount:         0,
+		knownSentinelCount: 1,
 	}
 }
 
@@ -58,28 +64,32 @@ func (mi *MasterInstance) checkMaster(sentinel *Sentinel) {
 	mi.lastPingTime = time.Now()
 	mi.mu.Unlock()
 
-	// 简化实现：实际应该发送PING命令并等待响应
-	// 这里暂时模拟成功
-	mi.mu.Lock()
-	mi.lastPongTime = time.Now()
+	// 检查是否超时
 	elapsed := time.Since(mi.lastPingTime)
-	mi.mu.Unlock()
 
 	if elapsed > mi.downAfter {
 		// 主节点可能下线
 		mi.mu.Lock()
 		if mi.state == "ok" {
 			mi.state = "sdown" // 主观下线
+			mi.sdownCount++
 			logger.Logger.Warn().
 				Str("master_name", mi.name).
 				Str("master_addr", mi.addr).
+				Int("sdown_count", mi.sdownCount).
+				Int("quorum", mi.quorum).
 				Msg("主节点主观下线")
+
+			// 尝试同步sdown状态到其他哨兵
+			sentinel.BroadcastSdown(mi.name)
 		}
 		mi.mu.Unlock()
 	} else {
+		// 主节点在线
 		mi.mu.Lock()
 		if mi.state == "sdown" {
 			mi.state = "ok"
+			mi.sdownCount = 0
 			logger.Logger.Info().
 				Str("master_name", mi.name).
 				Str("master_addr", mi.addr).
@@ -110,6 +120,7 @@ func (mi *MasterInstance) AddSentinel(sentinel *SentinelInstance) {
 	mi.mu.Lock()
 	defer mi.mu.Unlock()
 	mi.sentinels = append(mi.sentinels, sentinel)
+	mi.knownSentinelCount++
 }
 
 // GetState 获取状态
@@ -136,14 +147,118 @@ func (mi *MasterInstance) GetAddr() string {
 	return mi.addr
 }
 
+// SetAddr 设置地址
+func (mi *MasterInstance) SetAddr(addr string) {
+	mi.mu.Lock()
+	defer mi.mu.Unlock()
+	mi.addr = addr
+}
+
+// GetQuorum 获取quorum数量
+func (mi *MasterInstance) GetQuorum() int {
+	mi.mu.RLock()
+	defer mi.mu.RUnlock()
+	return mi.quorum
+}
+
+// GetSdownCount 获取主观下线计数
+func (mi *MasterInstance) GetSdownCount() int {
+	mi.mu.RLock()
+	defer mi.mu.RUnlock()
+	return mi.sdownCount
+}
+
+// IncrSdownCount 增加主观下线计数
+func (mi *MasterInstance) IncrSdownCount() {
+	mi.mu.Lock()
+	defer mi.mu.Unlock()
+	mi.sdownCount++
+}
+
+// IsDown 检查是否下线（主观或客观）
+func (mi *MasterInstance) IsDown() bool {
+	mi.mu.RLock()
+	defer mi.mu.RUnlock()
+	return mi.state == "sdown" || mi.state == "odown" || mi.state == "failover"
+}
+
+// IsODown 检查是否客观下线
+// 客观下线需要满足：
+// 1. 超过 quorum 数量的哨兵报告主观下线
+// 2. 多个哨兵之间需要达成共识
+func (mi *MasterInstance) IsODown() bool {
+	mi.mu.RLock()
+	state := mi.state
+	sdownCount := mi.sdownCount
+	quorum := mi.quorum
+	mi.mu.RUnlock()
+
+	// 如果已经是客观下线状态，直接返回
+	if state == "odown" || state == "failover" {
+		return true
+	}
+
+	// 检查是否达到quorum
+	// 实际应该从其他哨兵同步sdown状态，这里简化处理
+	if sdownCount >= quorum {
+		logger.Logger.Info().
+			Str("master_name", mi.name).
+			Int("sdown_count", sdownCount).
+			Int("quorum", quorum).
+			Msg("主节点已达到客观下线条件")
+		return true
+	}
+
+	return false
+}
+
+// SetODown 设置为客观下线状态
+func (mi *MasterInstance) SetODown() {
+	mi.mu.Lock()
+	defer mi.mu.Unlock()
+	if mi.state != "failover" {
+		mi.state = "odown"
+	}
+}
+
 // Stop 停止监控
 func (mi *MasterInstance) Stop() {
 	close(mi.stopCh)
 }
 
-// IsDown 检查是否下线
-func (mi *MasterInstance) IsDown() bool {
+// GetSentinelCount 获取已知哨兵数量
+func (mi *MasterInstance) GetSentinelCount() int {
 	mi.mu.RLock()
 	defer mi.mu.RUnlock()
-	return mi.state == "sdown" || mi.state == "odown" || mi.state == "failover"
+	return mi.knownSentinelCount
+}
+
+// UpdateSlaveOffset 更新从节点偏移量
+func (mi *MasterInstance) UpdateSlaveOffset(slaveAddr string, offset int64) {
+	mi.mu.RLock()
+	defer mi.mu.RUnlock()
+	for _, slave := range mi.slaves {
+		if slave.Addr == slaveAddr {
+			slave.Offset = offset
+			break
+		}
+	}
+}
+
+// GetBestSlave 获取最佳从节点（偏移量最大的）
+func (mi *MasterInstance) GetBestSlave() *SlaveInstance {
+	mi.mu.RLock()
+	defer mi.mu.RUnlock()
+
+	var best *SlaveInstance
+	var bestOffset int64 = -1
+
+	for _, slave := range mi.slaves {
+		if slave.State == "online" && slave.Offset > bestOffset {
+			bestOffset = slave.Offset
+			best = slave
+		}
+	}
+
+	return best
 }

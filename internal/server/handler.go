@@ -29,6 +29,8 @@ type Handler struct {
 	transaction *TransactionState
 	// 客户端信息（连接级别）
 	clientInfo *ClientInfo
+	// 集群ASKING状态
+	clusterAsking bool
 }
 
 // ClientInfo 客户端连接信息
@@ -70,9 +72,28 @@ func (h *Handler) checkAndHandleRedirect(key string) proto.RESP {
 	if h.Cluster == nil {
 		return nil // 不在集群模式，直接执行
 	}
+
+	// 如果处于 ASKING 状态，检查是否是导入中的槽
+	if h.clusterAsking {
+		slot := cluster.Slot(key)
+		if h.Cluster.IsImportingSlot(slot) {
+			// 导入中的槽，允许执行命令
+			return nil
+		}
+		// ASKING 状态已过期，重置
+		h.clusterAsking = false
+	}
+
 	redirect := h.Cluster.CheckSlotRedirect(key)
 	if redirect != nil {
-		return proto.NewError(redirect.Error())
+		// 如果是 MOVED 重定向，返回错误
+		if redirect.Type == "MOVED" {
+			return proto.NewError(redirect.Error())
+		}
+		// 如果是 ASK 重定向，返回错误
+		if redirect.Type == "ASK" {
+			return proto.NewError(redirect.Error())
+		}
 	}
 	return nil
 }
@@ -2940,6 +2961,13 @@ func (h *Handler) executeCommand(cmd string, args [][]byte, remoteAddr string) p
 			response = append(response, []byte(fmt.Sprintf("%.10g", m.Score)))
 		}
 		return &proto.Array{Args: response}
+
+	// ASKING 命令（用于集群槽迁移）
+	case "ASKING":
+		// ASKING 命令标记当前连接已发送 ASKING，允许执行针对导入中槽的命令
+		h.clusterAsking = true
+		logger.Logger.Debug().Msg("收到 ASKING 命令")
+		return proto.OK
 
 	// Cluster命令
 	case "CLUSTER":

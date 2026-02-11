@@ -18,6 +18,9 @@ type Node struct {
 	Epoch    int64    // 配置纪元（config epoch）
 	Slots    []SlotRange // 该节点负责的槽位范围
 	mu       sync.RWMutex
+	// 槽位迁移状态
+	importingSlots map[uint32]string // 正在导入的槽 -> 源节点地址
+	migratingSlots map[uint32]string // 正在迁移的槽 -> 目标节点地址
 }
 
 // SlotRange 表示槽位范围
@@ -29,13 +32,15 @@ type SlotRange struct {
 // NewNode 创建新节点
 func NewNode(id, addr string) *Node {
 	return &Node{
-		ID:       id,
-		Addr:     addr,
-		Flags:    []string{},
-		Slots:    []SlotRange{},
-		PingSent: 0,
-		PongRecv: 0,
-		Epoch:    0,
+		ID:             id,
+		Addr:           addr,
+		Flags:          []string{},
+		Slots:          []SlotRange{},
+		PingSent:       0,
+		PongRecv:       0,
+		Epoch:          0,
+		importingSlots: make(map[uint32]string),
+		migratingSlots: make(map[uint32]string),
 	}
 }
 
@@ -164,5 +169,87 @@ func (n *Node) GetHostPort() (string, string, error) {
 		return "", "", err
 	}
 	return host, port, nil
+}
+
+// IsImportingSlot 检查槽位是否正在导入
+func (n *Node) IsImportingSlot(slot uint32) bool {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+	_, exists := n.importingSlots[slot]
+	return exists
+}
+
+// IsMigratingSlot 检查槽位是否正在迁移
+func (n *Node) IsMigratingSlot(slot uint32) bool {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+	_, exists := n.migratingSlots[slot]
+	return exists
+}
+
+// SetImportingSlot 设置槽位正在导入
+func (n *Node) SetImportingSlot(slot uint32, sourceNodeAddr string) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.importingSlots[slot] = sourceNodeAddr
+}
+
+// SetMigratingSlot 设置槽位正在迁移
+func (n *Node) SetMigratingSlot(slot uint32, targetNodeAddr string) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.migratingSlots[slot] = targetNodeAddr
+}
+
+// ClearSlotMigration 清除槽位迁移状态
+func (n *Node) ClearSlotMigration(slot uint32) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	delete(n.importingSlots, slot)
+	delete(n.migratingSlots, slot)
+}
+
+// GetImportingSlots 获取所有正在导入的槽信息
+func (n *Node) GetImportingSlots() []ImportingSlotInfo {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+
+	result := make([]ImportingSlotInfo, 0, len(n.importingSlots))
+	for slot, sourceNode := range n.importingSlots {
+		result = append(result, ImportingSlotInfo{
+			Slot:       slot,
+			SourceNode: sourceNode,
+		})
+	}
+	return result
+}
+
+// GetMigratingSlots 获取所有正在迁移的槽信息
+func (n *Node) GetMigratingSlots() []MigratingSlotInfo {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+
+	result := make([]MigratingSlotInfo, 0, len(n.migratingSlots))
+	for slot, targetNode := range n.migratingSlots {
+		result = append(result, MigratingSlotInfo{
+			Slot:       slot,
+			TargetNode: targetNode,
+		})
+	}
+	return result
+}
+
+// GetImportingSlotSource 获取槽的源节点地址
+func (n *Node) GetImportingSlotSource(slot uint32) string {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+	return n.importingSlots[slot]
+}
+
+// GetMigratingSlotTarget 获取槽的目标节点地址
+func (n *Node) GetMigratingSlotTarget(slot uint32) string {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+	return n.migratingSlots[slot]
 }
 

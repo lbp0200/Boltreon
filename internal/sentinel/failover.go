@@ -2,6 +2,7 @@ package sentinel
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/lbp0200/BoltDB/internal/logger"
@@ -41,6 +42,7 @@ func (fm *FailoverManager) StartFailover(masterName string) error {
 
 	logger.Logger.Info().
 		Str("master_name", masterName).
+		Str("master_addr", master.GetAddr()).
 		Msg("开始故障转移")
 
 	// 选择新的主节点
@@ -49,6 +51,11 @@ func (fm *FailoverManager) StartFailover(masterName string) error {
 		master.SetState("odown")
 		return fmt.Errorf("no suitable slave found for failover")
 	}
+
+	logger.Logger.Info().
+		Str("new_master", newMaster.Addr).
+		Str("old_master", master.GetAddr()).
+		Msg("选中的新主节点")
 
 	// 执行故障转移
 	if err := fm.executeFailover(master, newMaster); err != nil {
@@ -75,15 +82,25 @@ func (fm *FailoverManager) selectNewMaster(oldMaster *MasterInstance) *SlaveInst
 		return nil
 	}
 
-	// 简化实现：选择第一个从节点
-	// 实际应该根据优先级、偏移量等选择
+	// 选择优先级最高且数据最新的从节点
+	var bestSlave *SlaveInstance
+	bestScore := int64(-1)
+
 	for _, slave := range slaves {
-		if slave.State == "online" {
-			return slave
+		if slave.State != "online" {
+			continue
+		}
+
+		// 简单评分：复制偏移量（越大越好，表示数据更新）
+		// 实际应该从节点上报偏移量，这里使用已知的Offset
+		score := slave.Offset
+		if score > bestScore {
+			bestScore = score
+			bestSlave = slave
 		}
 	}
 
-	return nil
+	return bestSlave
 }
 
 // executeFailover 执行故障转移
@@ -92,12 +109,42 @@ func (fm *FailoverManager) executeFailover(oldMaster *MasterInstance, newMaster 
 	// 发送 SLAVEOF NO ONE 命令
 	logger.Logger.Info().
 		Str("slave_addr", newMaster.Addr).
-		Msg("提升从节点为主节点")
+		Msg("发送 SLAVEOF NO ONE 到新主节点")
+
+	if err := SendSlaveOfNoOne(newMaster.Addr); err != nil {
+		logger.Logger.Error().
+			Str("slave_addr", newMaster.Addr).
+			Err(err).
+			Msg("发送 SLAVEOF NO ONE 失败")
+		return fmt.Errorf("failed to promote slave: %w", err)
+	}
 
 	// 2. 等待新主节点就绪
+	logger.Logger.Info().Msg("等待新主节点就绪...")
 	time.Sleep(1 * time.Second)
 
-	// 3. 将其他从节点重新配置为复制新主节点
+	// 3. 验证新主节点已提升
+	role, err := GetRole(newMaster.Addr)
+	if err != nil {
+		logger.Logger.Warn().
+			Str("addr", newMaster.Addr).
+			Err(err).
+			Msg("无法验证新主节点角色")
+	} else {
+		if !strings.HasPrefix(role, "+master") {
+			logger.Logger.Warn().
+				Str("addr", newMaster.Addr).
+				Str("role", role).
+				Msg("新主节点角色验证失败")
+		} else {
+			logger.Logger.Info().
+				Str("addr", newMaster.Addr).
+				Str("role", role).
+				Msg("新主节点已就绪")
+		}
+	}
+
+	// 4. 将其他从节点重新配置为复制新主节点
 	slaves := oldMaster.GetSlaves()
 	for _, slave := range slaves {
 		if slave.ID != newMaster.ID && slave.State == "online" {
@@ -105,7 +152,13 @@ func (fm *FailoverManager) executeFailover(oldMaster *MasterInstance, newMaster 
 				Str("slave_addr", slave.Addr).
 				Str("new_master", newMaster.Addr).
 				Msg("重新配置从节点")
-			// 发送 REPLICAOF 命令
+
+			if err := SendReplicaOf(slave.Addr, newMaster.Addr); err != nil {
+				logger.Logger.Warn().
+					Str("slave", slave.Addr).
+					Err(err).
+					Msg("重新配置从节点失败")
+			}
 		}
 	}
 
@@ -127,4 +180,30 @@ func (fm *FailoverManager) updateConfiguration(oldMaster *MasterInstance, newMas
 		Str("master_name", oldMaster.GetName()).
 		Str("new_addr", newMaster.Addr).
 		Msg("更新主节点配置")
+}
+
+// AutoFailover 自动故障转移（检测到客观下线时触发）
+func (fm *FailoverManager) AutoFailover(masterName string) error {
+	// 检查是否满足自动故障转移条件
+	master := fm.sentinel.GetMaster(masterName)
+	if master == nil {
+		return fmt.Errorf("master %s not found", masterName)
+	}
+
+	// 检查是否满足客观下线条件
+	if !master.IsODown() {
+		return fmt.Errorf("master %s is not objectively down", masterName)
+	}
+
+	// 检查是否已经有其他哨兵在执行故障转移
+	if master.GetState() == "failover" {
+		return fmt.Errorf("failover already in progress for master %s", masterName)
+	}
+
+	logger.Logger.Info().
+		Str("master_name", masterName).
+		Str("master_addr", master.GetAddr()).
+		Msg("自动故障转移条件满足，开始故障转移")
+
+	return fm.StartFailover(masterName)
 }

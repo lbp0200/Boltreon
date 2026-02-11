@@ -316,3 +316,107 @@ func (c *Cluster) UpdateNodeEpoch(nodeID string, epoch int64) {
 	}
 }
 
+// SlotMigrationState 槽位迁移状态
+type SlotMigrationState struct {
+	Slot       uint32
+	SourceNode string
+	TargetNode string
+	State      string // "migrating" | "importing" | "stable"
+}
+
+// ImportingSlotInfo 导入中的槽信息
+type ImportingSlotInfo struct {
+	Slot       uint32
+	SourceNode string
+}
+
+// MigratingSlotInfo 迁移中的槽信息
+type MigratingSlotInfo struct {
+	Slot       uint32
+	TargetNode string
+}
+
+// IsImportingSlot 检查槽位是否正在导入到当前节点
+func (c *Cluster) IsImportingSlot(slot uint32) bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	if node := c.Slots[slot]; node != nil && node.ID == c.Myself.ID {
+		// 检查当前节点是否标记为从其他节点导入此槽
+		return c.Myself.IsImportingSlot(slot)
+	}
+	return false
+}
+
+// IsMigratingSlot 检查槽位是否正在从当前节点迁移出去
+func (c *Cluster) IsMigratingSlot(slot uint32) bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	if node := c.Slots[slot]; node != nil && node.ID == c.Myself.ID {
+		// 检查当前节点是否标记为正在迁移此槽
+		return c.Myself.IsMigratingSlot(slot)
+	}
+	return false
+}
+
+// GetImportingSlots 获取所有正在导入到当前节点的槽
+func (c *Cluster) GetImportingSlots() []ImportingSlotInfo {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.Myself.GetImportingSlots()
+}
+
+// GetMigratingSlots 获取所有正在从当前节点迁移的槽
+func (c *Cluster) GetMigratingSlots() []MigratingSlotInfo {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.Myself.GetMigratingSlots()
+}
+
+// SetSlotImporting 设置槽位正在导入
+func (c *Cluster) SetSlotImporting(slot uint32, sourceNodeID string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if node, exists := c.Nodes[sourceNodeID]; exists {
+		c.Myself.SetImportingSlot(slot, node.Addr)
+	}
+}
+
+// SetSlotMigrating 设置槽位正在迁移
+func (c *Cluster) SetSlotMigrating(slot uint32, targetNodeID string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if node, exists := c.Nodes[targetNodeID]; exists {
+		c.Myself.SetMigratingSlot(slot, node.Addr)
+	}
+}
+
+// ClearSlotMigration 清除槽位迁移状态
+func (c *Cluster) ClearSlotMigration(slot uint32) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.Myself.ClearSlotMigration(slot)
+}
+
+// GetAskRedirect 获取ASK重定向信息
+func (c *Cluster) GetAskRedirect(key string) *RedirectError {
+	slot := Slot(key)
+
+	// 如果槽属于当前节点，检查是否正在导入
+	if c.IsSlotLocal(slot) && c.IsImportingSlot(slot) {
+		// 返回ASK重定向到源节点
+		importingSlots := c.GetImportingSlots()
+		for _, info := range importingSlots {
+			if info.Slot == slot {
+				return NewAskError(slot, info.SourceNode)
+			}
+		}
+	}
+
+	return nil
+}
+

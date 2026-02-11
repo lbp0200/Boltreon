@@ -18,6 +18,21 @@ type Sentinel struct {
 	runID         string
 	configEpoch   int64
 	stopCh        chan struct{}
+	// 其他哨兵地址列表
+	otherSentinels []string
+	// gossip消息通道
+	gossipCh chan *GossipMessage
+}
+
+// GossipMessage 哨兵间通信消息
+type GossipMessage struct {
+	Type         string // "sdown" | "hello" | "masters"
+	MasterName   string
+	SourceRunID  string
+	SentinelAddr string
+	State        string
+	SdownCount   int
+	Timestamp    time.Time
 }
 
 // NewSentinel 创建新的哨兵实例
@@ -30,6 +45,7 @@ func NewSentinel(quorum int, downAfter time.Duration) *Sentinel {
 		runID:        generateRunID(),
 		configEpoch:  0,
 		stopCh:       make(chan struct{}),
+		gossipCh:     make(chan *GossipMessage, 100),
 	}
 }
 
@@ -95,6 +111,20 @@ func (s *Sentinel) GetAllMasters() map[string]*MasterInstance {
 	return result
 }
 
+// AddSentinel 添加其他哨兵地址
+func (s *Sentinel) AddSentinel(addr string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for _, existing := range s.otherSentinels {
+		if existing == addr {
+			return
+		}
+	}
+	s.otherSentinels = append(s.otherSentinels, addr)
+	logger.Logger.Info().Str("sentinel", addr).Msg("添加哨兵")
+}
+
 // Start 启动哨兵
 func (s *Sentinel) Start() {
 	logger.Logger.Info().Msg("启动哨兵")
@@ -110,6 +140,9 @@ func (s *Sentinel) Start() {
 	for _, master := range masters {
 		go master.StartMonitoring(s)
 	}
+
+	// 启动gossip协程
+	go s.startGossipProcessor()
 }
 
 // Stop 停止哨兵
@@ -144,4 +177,130 @@ func (s *Sentinel) IncrementConfigEpoch() int64 {
 	defer s.mu.Unlock()
 	s.configEpoch++
 	return s.configEpoch
+}
+
+// BroadcastSdown 广播主观下线消息到其他哨兵
+func (s *Sentinel) BroadcastSdown(masterName string) {
+	master := s.GetMaster(masterName)
+	if master == nil {
+		return
+	}
+
+	msg := &GossipMessage{
+		Type:         "sdown",
+		MasterName:   masterName,
+		SourceRunID:  s.runID,
+		SentinelAddr: "", // 稍后填充
+		State:        "sdown",
+		SdownCount:   master.GetSdownCount(),
+		Timestamp:    time.Now(),
+	}
+
+	// 发送到gossip处理器
+	select {
+	case s.gossipCh <- msg:
+	default:
+		// 通道满，忽略
+	}
+}
+
+// startGossipProcessor 启动gossip消息处理器
+func (s *Sentinel) startGossipProcessor() {
+	for {
+		select {
+		case <-s.stopCh:
+			return
+		case msg := <-s.gossipCh:
+			s.processGossipMessage(msg)
+		}
+	}
+}
+
+// processGossipMessage 处理gossip消息
+func (s *Sentinel) processGossipMessage(msg *GossipMessage) {
+	switch msg.Type {
+	case "sdown":
+		s.handleSdownMessage(msg)
+	case "hello":
+		s.handleHelloMessage(msg)
+	}
+}
+
+// handleSdownMessage 处理主观下线消息
+func (s *Sentinel) handleSdownMessage(msg *GossipMessage) {
+	master := s.GetMaster(msg.MasterName)
+	if master == nil {
+		return
+	}
+
+	// 更新sdown计数（简化实现，实际应该记录每个哨兵的报告）
+	master.IncrSdownCount()
+
+	logger.Logger.Info().
+		Str("master_name", msg.MasterName).
+		Str("from_sentinel", msg.SourceRunID).
+		Int("sdown_count", master.GetSdownCount()).
+		Int("quorum", master.GetQuorum()).
+		Msg("收到其他哨兵的sdown报告")
+
+	// 检查是否达到客观下线
+	if master.IsODown() {
+		logger.Logger.Info().
+			Str("master_name", msg.MasterName).
+			Msg("主节点已客观下线，触发故障转移")
+
+		// 触发故障转移
+		fm := NewFailoverManager(s)
+		go func() {
+			if err := fm.AutoFailover(msg.MasterName); err != nil {
+				logger.Logger.Error().
+					Str("master_name", msg.MasterName).
+					Err(err).
+					Msg("自动故障转移失败")
+			}
+		}()
+	}
+}
+
+// handleHelloMessage 处理hello消息
+func (s *Sentinel) handleHelloMessage(msg *GossipMessage) {
+	// 添加到已知哨兵列表
+	s.AddSentinel(msg.SentinelAddr)
+
+	logger.Logger.Debug().
+		Str("from_sentinel", msg.SourceRunID).
+		Str("addr", msg.SentinelAddr).
+		Msg("收到哨兵hello消息")
+}
+
+// SendHello 发送hello消息到指定哨兵
+func (s *Sentinel) SendHello(sentinelAddr string) error {
+	// 简化实现：实际应该建立TCP连接并发送hello消息
+	logger.Logger.Debug().Str("sentinel", sentinelAddr).Msg("发送hello消息")
+	return nil
+}
+
+// StartGossip 启动与指定哨兵的gossip通信
+func (s *Sentinel) StartGossip(sentinelAddr string) {
+	s.AddSentinel(sentinelAddr)
+
+	// 定期发送hello消息
+	go func() {
+		ticker := time.NewTicker(10 * time.Second)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-s.stopCh:
+				return
+			case <-ticker.C:
+				if err := s.SendHello(sentinelAddr); err != nil {
+					logger.Logger.Warn().
+						Str("sentinel", sentinelAddr).
+						Err(err).
+						Msg("发送hello消息失败")
+				}
+			}
+		}
+	}()
 }
