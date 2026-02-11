@@ -4,10 +4,12 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"math"
 	"net"
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/lbp0200/BoltDB/internal/backup"
 	"github.com/lbp0200/BoltDB/internal/cluster"
@@ -26,33 +28,33 @@ type Handler struct {
 	// 事务状态（每个连接独立）
 	transaction *TransactionState
 	// 客户端信息（连接级别）
-	clientInfo  *ClientInfo
+	clientInfo *ClientInfo
 }
 
 // ClientInfo 客户端连接信息
 type ClientInfo struct {
-	ID        int64  // 客户端 ID
-	Addr      string // 客户端地址
-	FD        int    // 文件描述符
-	Age       int64  // 连接时长（秒）
-	Idle      int64  // 空闲时间（秒）
-	Flags     string // 客户端标志
-	DB        int    // 当前数据库 ID
-	Sub       int    // 订阅频道数
-	PSub      int    // 模式订阅数
-	Multi     int    //事务中的命令数
-	Cmd       string // 最后执行的命令
-	OFlags    string // 客户端输出缓冲区限制标志
-	Events    string // 事件处理标志
-	Keys      map[string]struct{} // 客户端监控的键
-	ReadOnly  bool  // 只读模式
+	ID       int64               // 客户端 ID
+	Addr     string              // 客户端地址
+	FD       int                 // 文件描述符
+	Age      int64               // 连接时长（秒）
+	Idle     int64               // 空闲时间（秒）
+	Flags    string              // 客户端标志
+	DB       int                 // 当前数据库 ID
+	Sub      int                 // 订阅频道数
+	PSub     int                 // 模式订阅数
+	Multi    int                 //事务中的命令数
+	Cmd      string              // 最后执行的命令
+	OFlags   string              // 客户端输出缓冲区限制标志
+	Events   string              // 事件处理标志
+	Keys     map[string]struct{} // 客户端监控的键
+	ReadOnly bool                // 只读模式
 }
 
 // TransactionState 事务状态
 type TransactionState struct {
 	Commands   []TransactionCommand // 排队的命令
-	WatchKeys  map[string]struct{} // 监控的键
-	IsWatching bool                // 是否处于WATCH状态
+	WatchKeys  map[string]struct{}  // 监控的键
+	IsWatching bool                 // 是否处于WATCH状态
 }
 
 // TransactionCommand 事务中的命令
@@ -586,6 +588,37 @@ func (h *Handler) executeCommand(cmd string, args [][]byte) proto.RESP {
 			return proto.NewError(fmt.Sprintf("ERR %v", err))
 		}
 		return proto.NewInteger(int64(length))
+
+	case "BITFIELD":
+		// BITFIELD key [GET type offset | SET type offset value | INCRBY type offset increment] ...
+		if len(args) < 3 {
+			return proto.NewError("ERR wrong number of arguments for 'BITFIELD' command")
+		}
+		key := string(args[0])
+		operations := make([]string, 0, len(args)-1)
+		for i := 1; i < len(args); i++ {
+			operations = append(operations, string(args[i]))
+		}
+		results, err := h.Db.BitField(key, operations)
+		if err != nil {
+			return proto.NewError(fmt.Sprintf("ERR %v", err))
+		}
+		// Convert results to RESP array
+		respArgs := make([][]byte, len(results))
+		for i, r := range results {
+			switch val := r.(type) {
+			case int64:
+				respArgs[i] = []byte(strconv.FormatInt(val, 10))
+			case []interface{}:
+				// Overflow case: [value, overflow_type]
+				var b strings.Builder
+				b.WriteString(strconv.FormatInt(val[0].(int64), 10))
+				b.WriteString(":")
+				b.WriteString(val[1].(string))
+				respArgs[i] = []byte(b.String())
+			}
+		}
+		return &proto.Array{Args: respArgs}
 
 	case "GETRANGE":
 		if len(args) < 3 {
@@ -1302,7 +1335,7 @@ func (h *Handler) executeCommand(cmd string, args [][]byte) proto.RESP {
 		if err != nil {
 			return proto.NewError("ERR timeout is not a float")
 		}
-		value, err := h.Db.BLMove(source, destination, sourceDirection, destinationDirection, timeout)
+		value, err := h.Db.BLMoveBlocking(source, destination, sourceDirection, destinationDirection, timeout)
 		if err != nil {
 			return proto.NewError(fmt.Sprintf("ERR %v", err))
 		}
@@ -1355,7 +1388,7 @@ func (h *Handler) executeCommand(cmd string, args [][]byte) proto.RESP {
 		if err != nil {
 			return proto.NewError("ERR timeout is not an integer or out of range")
 		}
-		key, value, err := h.Db.BLPOP(keys, timeout)
+		key, value, err := h.Db.BLPOPBlocking(keys, timeout)
 		if err != nil || key == "" {
 			return &proto.Array{Args: [][]byte{}}
 		}
@@ -1373,7 +1406,7 @@ func (h *Handler) executeCommand(cmd string, args [][]byte) proto.RESP {
 		if err != nil {
 			return proto.NewError("ERR timeout is not an integer or out of range")
 		}
-		key, value, err := h.Db.BRPOP(keys, timeout)
+		key, value, err := h.Db.BRPOPBlocking(keys, timeout)
 		if err != nil || key == "" {
 			return &proto.Array{Args: [][]byte{}}
 		}
@@ -1388,7 +1421,7 @@ func (h *Handler) executeCommand(cmd string, args [][]byte) proto.RESP {
 		if err != nil {
 			return proto.NewError("ERR timeout is not an integer or out of range")
 		}
-		value, err := h.Db.BRPOPLPUSH(source, destination, timeout)
+		value, err := h.Db.BRPOPLPUSHBlocking(source, destination, timeout)
 		if err != nil || value == "" {
 			return proto.NewBulkString(nil)
 		}
@@ -1899,6 +1932,46 @@ func (h *Handler) executeCommand(cmd string, args [][]byte) proto.RESP {
 		// #nosec G115 - count is bounded by practical data size limits
 		return proto.NewInteger(int64(count))
 
+	case "SSCAN":
+		// SSCAN key cursor [MATCH pattern] [COUNT count]
+		if len(args) < 2 {
+			return proto.NewError("ERR wrong number of arguments for 'SSCAN' command")
+		}
+		key := string(args[0])
+		cursor, err := strconv.ParseUint(string(args[1]), 10, 64)
+		if err != nil {
+			return proto.NewError("ERR value is not an integer")
+		}
+		pattern := ""
+		count := 10
+		// Parse optional MATCH and COUNT
+		if len(args) > 2 {
+			for i := 2; i < len(args); i++ {
+				opt := strings.ToUpper(string(args[i]))
+				if opt == "MATCH" && i+1 < len(args) {
+					pattern = string(args[i+1])
+					i++
+				} else if opt == "COUNT" && i+1 < len(args) {
+					count, err = strconv.Atoi(string(args[i+1]))
+					if err != nil {
+						return proto.NewError("ERR value is not an integer")
+					}
+					i++
+				}
+			}
+		}
+		result, err := h.Db.SScan(key, cursor, pattern, count)
+		if err != nil {
+			return proto.NewError(fmt.Sprintf("ERR %v", err))
+		}
+		// 返回格式: [cursor, [member1, member2, ...]]
+		response := make([][]byte, 0, 2+len(result.Members))
+		response = append(response, []byte(strconv.FormatUint(result.Cursor, 10)))
+		for _, m := range result.Members {
+			response = append(response, []byte(m))
+		}
+		return &proto.Array{Args: response}
+
 	// SortedSet命令 - 由于代码太长，这里只实现主要命令
 	case "ZADD":
 		if len(args) < 3 {
@@ -2039,6 +2112,134 @@ func (h *Handler) executeCommand(cmd string, args [][]byte) proto.RESP {
 			}
 		} else {
 			// 没有 WITHSCORES：只返回 member 列表
+			for _, m := range members {
+				results = append(results, []byte(m.Member))
+			}
+		}
+		return &proto.Array{Args: results}
+
+	case "ZRANGEBYSCORE":
+		// ZRANGEBYSCORE key min max [WITHSCORES] [LIMIT offset count]
+		if len(args) < 3 {
+			return proto.NewError("ERR wrong number of arguments for 'ZRANGEBYSCORE' command")
+		}
+		key := string(args[0])
+		minStr := string(args[1])
+		maxStr := string(args[2])
+
+		// 解析分数范围
+		minScore, err := parseScore(minStr)
+		if err != nil {
+			return proto.NewError("ERR min or max is not a float")
+		}
+		maxScore, err := parseScore(maxStr)
+		if err != nil {
+			return proto.NewError("ERR min or max is not a float")
+		}
+
+		// 解析可选参数
+		offset := 0
+		count := -1 // -1 表示返回所有
+		withScores := false
+
+		i := 3
+		for i < len(args) {
+			arg := strings.ToUpper(string(args[i]))
+			i++
+			if arg == "WITHSCORES" {
+				withScores = true
+			} else if arg == "LIMIT" {
+				if i+1 >= len(args) {
+					return proto.NewError("ERR syntax error")
+				}
+				offset, err = strconv.Atoi(string(args[i]))
+				i++
+				if err != nil {
+					return proto.NewError("ERR LIMIT offset is not an integer")
+				}
+				count, err = strconv.Atoi(string(args[i]))
+				i++
+				if err != nil {
+					return proto.NewError("ERR LIMIT count is not an integer")
+				}
+			}
+		}
+
+		members, err := h.Db.ZRangeByScore(key, minScore, maxScore, offset, count)
+		if err != nil {
+			return &proto.Array{Args: [][]byte{}}
+		}
+
+		results := make([][]byte, 0)
+		if withScores {
+			for _, m := range members {
+				results = append(results, []byte(m.Member), []byte(fmt.Sprintf("%.10g", m.Score)))
+			}
+		} else {
+			for _, m := range members {
+				results = append(results, []byte(m.Member))
+			}
+		}
+		return &proto.Array{Args: results}
+
+	case "ZREVRANGEBYSCORE":
+		// ZREVRANGEBYSCORE key max min [WITHSCORES] [LIMIT offset count]
+		if len(args) < 3 {
+			return proto.NewError("ERR wrong number of arguments for 'ZREVRANGEBYSCORE' command")
+		}
+		key := string(args[0])
+		maxStr := string(args[1])
+		minStr := string(args[2])
+
+		// 解析分数范围
+		maxScore, err := parseScore(maxStr)
+		if err != nil {
+			return proto.NewError("ERR min or max is not a float")
+		}
+		minScore, err := parseScore(minStr)
+		if err != nil {
+			return proto.NewError("ERR min or max is not a float")
+		}
+
+		// 解析可选参数
+		offset := 0
+		count := -1 // -1 表示返回所有
+		withScores := false
+
+		i := 3
+		for i < len(args) {
+			arg := strings.ToUpper(string(args[i]))
+			i++
+			if arg == "WITHSCORES" {
+				withScores = true
+			} else if arg == "LIMIT" {
+				if i+1 >= len(args) {
+					return proto.NewError("ERR syntax error")
+				}
+				offset, err = strconv.Atoi(string(args[i]))
+				i++
+				if err != nil {
+					return proto.NewError("ERR LIMIT offset is not an integer")
+				}
+				count, err = strconv.Atoi(string(args[i]))
+				i++
+				if err != nil {
+					return proto.NewError("ERR LIMIT count is not an integer")
+				}
+			}
+		}
+
+		members, err := h.Db.ZRevRangeByScore(key, maxScore, minScore, offset, count)
+		if err != nil {
+			return &proto.Array{Args: [][]byte{}}
+		}
+
+		results := make([][]byte, 0)
+		if withScores {
+			for _, m := range members {
+				results = append(results, []byte(m.Member), []byte(fmt.Sprintf("%.10g", m.Score)))
+			}
+		} else {
 			for _, m := range members {
 				results = append(results, []byte(m.Member))
 			}
@@ -2348,6 +2549,151 @@ func (h *Handler) executeCommand(cmd string, args [][]byte) proto.RESP {
 		}
 		return proto.NewInteger(count)
 
+	case "ZLEXCOUNT":
+		// ZLEXCOUNT key min max
+		if len(args) < 3 {
+			return proto.NewError("ERR wrong number of arguments for 'ZLEXCOUNT' command")
+		}
+		zSetName := string(args[0])
+		min := string(args[1])
+		max := string(args[2])
+		count, err := h.Db.ZLexCount(zSetName, min, max)
+		if err != nil {
+			return proto.NewError(fmt.Sprintf("ERR %v", err))
+		}
+		return proto.NewInteger(count)
+
+	case "ZRANGEBYLEX":
+		// ZRANGEBYLEX key min max [LIMIT offset count]
+		if len(args) < 3 {
+			return proto.NewError("ERR wrong number of arguments for 'ZRANGEBYLEX' command")
+		}
+		zSetName := string(args[0])
+		min := string(args[1])
+		max := string(args[2])
+		offset := 0
+		count := -1
+		var err error
+		// Parse optional LIMIT
+		if len(args) > 3 {
+			for i := 3; i < len(args); i++ {
+				opt := strings.ToUpper(string(args[i]))
+				if opt == "LIMIT" && i+2 < len(args) {
+					offset, err = strconv.Atoi(string(args[i+1]))
+					if err != nil {
+						return proto.NewError("ERR value is not an integer")
+					}
+					count, err = strconv.Atoi(string(args[i+2]))
+					if err != nil {
+						return proto.NewError("ERR value is not an integer")
+					}
+					i += 2
+				}
+			}
+		}
+		members, err := h.Db.ZRangeByLex(zSetName, min, max, offset, count)
+		if err != nil {
+			return proto.NewError(fmt.Sprintf("ERR %v", err))
+		}
+		result := make([][]byte, len(members))
+		for i, m := range members {
+			result[i] = []byte(m)
+		}
+		return &proto.Array{Args: result}
+
+	case "ZREVRANGEBYLEX":
+		// ZREVRANGEBYLEX key max min [LIMIT offset count]
+		if len(args) < 3 {
+			return proto.NewError("ERR wrong number of arguments for 'ZREVRANGEBYLEX' command")
+		}
+		zSetName := string(args[0])
+		max := string(args[1])
+		min := string(args[2])
+		offset := 0
+		count := -1
+		var err error
+		// Parse optional LIMIT
+		if len(args) > 3 {
+			for i := 3; i < len(args); i++ {
+				opt := strings.ToUpper(string(args[i]))
+				if opt == "LIMIT" && i+2 < len(args) {
+					offset, err = strconv.Atoi(string(args[i+1]))
+					if err != nil {
+						return proto.NewError("ERR value is not an integer")
+					}
+					count, err = strconv.Atoi(string(args[i+2]))
+					if err != nil {
+						return proto.NewError("ERR value is not an integer")
+					}
+					i += 2
+				}
+			}
+		}
+		members, err := h.Db.ZRevRangeByLex(zSetName, max, min, offset, count)
+		if err != nil {
+			return proto.NewError(fmt.Sprintf("ERR %v", err))
+		}
+		result := make([][]byte, len(members))
+		for i, m := range members {
+			result[i] = []byte(m)
+		}
+		return &proto.Array{Args: result}
+
+	case "ZREMRANGEBYLEX":
+		// ZREMRANGEBYLEX key min max
+		if len(args) < 3 {
+			return proto.NewError("ERR wrong number of arguments for 'ZREMRANGEBYLEX' command")
+		}
+		zSetName := string(args[0])
+		min := string(args[1])
+		max := string(args[2])
+		removed, err := h.Db.ZRemRangeByLex(zSetName, min, max)
+		if err != nil {
+			return proto.NewError(fmt.Sprintf("ERR %v", err))
+		}
+		return proto.NewInteger(removed)
+
+	case "ZSCAN":
+		// ZSCAN key cursor [MATCH pattern] [COUNT count]
+		if len(args) < 2 {
+			return proto.NewError("ERR wrong number of arguments for 'ZSCAN' command")
+		}
+		zSetName := string(args[0])
+		cursor, err := strconv.ParseUint(string(args[1]), 10, 64)
+		if err != nil {
+			return proto.NewError("ERR value is not an integer")
+		}
+		pattern := ""
+		count := 10
+		// Parse optional MATCH and COUNT
+		if len(args) > 2 {
+			for i := 2; i < len(args); i++ {
+				opt := strings.ToUpper(string(args[i]))
+				if opt == "MATCH" && i+1 < len(args) {
+					pattern = string(args[i+1])
+					i++
+				} else if opt == "COUNT" && i+1 < len(args) {
+					count, err = strconv.Atoi(string(args[i+1]))
+					if err != nil {
+						return proto.NewError("ERR value is not an integer")
+					}
+					i++
+				}
+			}
+		}
+		result, err := h.Db.ZScan(zSetName, cursor, pattern, count)
+		if err != nil {
+			return proto.NewError(fmt.Sprintf("ERR %v", err))
+		}
+		// 返回格式: [cursor, [member1, score1, member2, score2, ...]]
+		response := make([][]byte, 0, 2+len(result.Members)*2)
+		response = append(response, []byte(strconv.FormatUint(result.Cursor, 10)))
+		for _, m := range result.Members {
+			response = append(response, []byte(m.Member))
+			response = append(response, []byte(fmt.Sprintf("%.10g", m.Score)))
+		}
+		return &proto.Array{Args: response}
+
 	// Cluster命令
 	case "CLUSTER":
 		if h.Cluster == nil {
@@ -2596,6 +2942,97 @@ func (h *Handler) executeCommand(cmd string, args [][]byte) proto.RESP {
 			return proto.NewError(fmt.Sprintf("ERR %v", err))
 		}
 		return proto.OK
+
+	case "SELECT":
+		// BoltDB is a single-database implementation
+		// Always return OK regardless of the database number
+		if len(args) < 1 {
+			return proto.NewError("ERR wrong number of arguments for 'SELECT' command")
+		}
+		return proto.OK
+
+	case "MOVE":
+		// BoltDB is a single-database implementation
+		// MOVE always returns 0 (key was not moved)
+		if len(args) < 2 {
+			return proto.NewError("ERR wrong number of arguments for 'MOVE' command")
+		}
+		// #nosec G115 - result is always 0 for single-db implementation
+		return proto.NewInteger(0)
+
+	case "WAIT":
+		// BoltDB does not support replication yet
+		// Return 0 (number of replicas acknowledged)
+		if len(args) < 2 {
+			return proto.NewError("ERR wrong number of arguments for 'WAIT' command")
+		}
+		// #nosec G115 - result is always 0 for non-replicated implementation
+		return proto.NewInteger(0)
+
+	case "SLOWLOG":
+		// BoltDB does not implement slow query logging yet
+		// Return empty list for all subcommands
+		if len(args) < 1 {
+			return proto.NewError("ERR wrong number of arguments for 'SLOWLOG' command")
+		}
+		subCommand := strings.ToUpper(string(args[0]))
+		switch subCommand {
+		case "GET":
+			// Return empty array for GET
+			return &proto.Array{Args: [][]byte{}}
+		case "LEN":
+			// Return 0 (no slowlog entries)
+			return proto.NewInteger(0)
+		case "RESET":
+			// Return OK for RESET
+			return proto.OK
+		case "HELP":
+			return &proto.Array{Args: [][]byte{
+				[]byte("SLOWLOG GET <count> - returns top <count> entries from the slowlog"),
+				[]byte("SLOWLOG LEN - returns the length of the slowlog"),
+				[]byte("SLOWLOG RESET - clears the slowlog"),
+				[]byte("SLOWLOG HELP - shows this help message"),
+			}}
+		default:
+			return proto.NewError("ERR unknown subcommand for 'SLOWLOG'")
+		}
+
+	case "MEMORY":
+		if len(args) < 1 {
+			return proto.NewError("ERR wrong number of arguments for 'MEMORY' command")
+		}
+		subCommand := strings.ToUpper(string(args[0]))
+		switch subCommand {
+		case "USAGE":
+			// MEMORY USAGE key [SAMPLES count]
+			if len(args) < 2 {
+				return proto.NewError("ERR wrong number of arguments for 'MEMORY USAGE' command")
+			}
+			key := string(args[1])
+			// Estimate memory usage - use key type size approximation
+			size, err := h.Db.MemoryUsage(key)
+			if err != nil {
+				if errors.Is(err, store.ErrKeyNotFound) {
+					return proto.NewBulkString(nil)
+				}
+				return proto.NewError(fmt.Sprintf("ERR %v", err))
+			}
+			return proto.NewInteger(size)
+		case "DOCTOR":
+			// Return basic memory info
+			return &proto.Array{Args: [][]byte{
+				[]byte("BoltDB uses BadgerDB for storage"),
+				[]byte("Memory usage is managed by the underlying BadgerDB engine"),
+			}}
+		case "HELP":
+			return &proto.Array{Args: [][]byte{
+				[]byte("MEMORY USAGE key [SAMPLES count] - estimate memory usage of key"),
+				[]byte("MEMORY DOCTOR - reports memory usage details"),
+				[]byte("MEMORY HELP - shows this help message"),
+			}}
+		default:
+			return proto.NewError("ERR unknown subcommand for 'MEMORY'")
+		}
 
 	// Pub/Sub命令
 	case "PUBLISH":
@@ -2875,7 +3312,7 @@ func (h *Handler) executeCommand(cmd string, args [][]byte) proto.RESP {
 		// Parse: FROMMEMBER member [FROMLONLAT lon lat] [BYRADIUS radius unit | BYBOX width height unit] [ASC | DESC] [COUNT count] [WITHCOORD] [WITHDIST] [WITHHASH]
 		var centerLon, centerLat float64
 		var radius float64
-		var unit string = "m"
+		var unit string
 		var count int = 0
 		var withDist, withHash, withCoord bool
 
@@ -3007,7 +3444,7 @@ func (h *Handler) executeCommand(cmd string, args [][]byte) proto.RESP {
 
 		var centerLon, centerLat float64
 		var radius float64
-		var unit string = "m"
+		var unit string
 		var count int = 0
 		var storeDist bool
 
@@ -3125,7 +3562,10 @@ func (h *Handler) executeCommand(cmd string, args [][]byte) proto.RESP {
 
 		// ID or field name
 		id = string(args[i])
-		if id != "*" && id[0] != '-' {
+		if id == "*" || (len(id) > 0 && id[0] == '-') {
+			// It's the ID (* or an option), skip it
+			i++
+		} else {
 			// It's the ID
 			i++
 		}
@@ -3133,6 +3573,9 @@ func (h *Handler) executeCommand(cmd string, args [][]byte) proto.RESP {
 		// Remaining args are field-value pairs
 		for i < len(args) {
 			field := string(args[i])
+			if i+1 >= len(args) {
+				return proto.NewError("ERR syntax error")
+			}
 			value := string(args[i+1])
 			fields[field] = value
 			i += 2
@@ -3195,8 +3638,8 @@ func (h *Handler) executeCommand(cmd string, args [][]byte) proto.RESP {
 		// Parse stream IDs
 		// Format: key1 id1 key2 id2 ...
 		remaining := len(args) - i
-		if remaining < 2 || remaining%2 != 1 {
-			return proto.NewError("ERR syntax error")
+		if remaining < 2 || remaining%2 != 0 {
+			return proto.NewError(fmt.Sprintf("ERR syntax error: remaining=%d, i=%d, len(args)=%d", remaining, i, len(args)))
 		}
 		numStreams := remaining / 2
 		streamKeys := make([]string, numStreams)
@@ -3360,17 +3803,17 @@ func (h *Handler) executeCommand(cmd string, args [][]byte) proto.RESP {
 
 	// ==================== XGROUP ====================
 	case "XGROUP":
-		if len(args) < 2 {
+		if len(args) < 1 {
 			return proto.NewError("ERR wrong number of arguments for 'XGROUP' command")
 		}
-		subcommand := strings.ToUpper(string(args[1]))
+		subcommand := strings.ToUpper(string(args[0]))
 
 		switch subcommand {
 		case "CREATE":
-			if len(args) < 5 {
+			if len(args) < 4 {
 				return proto.NewError("ERR wrong number of arguments for 'XGROUP CREATE' command")
 			}
-			key := string(args[0])
+			key := string(args[1])
 			group := string(args[2])
 			startID := string(args[3])
 			// Skip MKSTREAM option for now
@@ -3383,7 +3826,7 @@ func (h *Handler) executeCommand(cmd string, args [][]byte) proto.RESP {
 			if len(args) < 3 {
 				return proto.NewError("ERR wrong number of arguments for 'XGROUP DESTROY' command")
 			}
-			key := string(args[0])
+			key := string(args[1])
 			group := string(args[2])
 			err := h.Db.XGroupDestroy(key, group)
 			if err != nil {
@@ -3394,7 +3837,7 @@ func (h *Handler) executeCommand(cmd string, args [][]byte) proto.RESP {
 			if len(args) < 4 {
 				return proto.NewError("ERR wrong number of arguments for 'XGROUP SETID' command")
 			}
-			key := string(args[0])
+			key := string(args[1])
 			group := string(args[2])
 			id := string(args[3])
 			err := h.Db.XGroupSetID(key, group, id)
@@ -3406,7 +3849,7 @@ func (h *Handler) executeCommand(cmd string, args [][]byte) proto.RESP {
 			if len(args) < 4 {
 				return proto.NewError("ERR wrong number of arguments for 'XGROUP DELCONSUMER' command")
 			}
-			key := string(args[0])
+			key := string(args[1])
 			group := string(args[2])
 			consumer := string(args[3])
 			err := h.Db.XGroupDelConsumer(key, group, consumer)
@@ -3424,10 +3867,62 @@ func (h *Handler) executeCommand(cmd string, args [][]byte) proto.RESP {
 		var block int64 = 0
 		var group, consumer string
 
-		// Parse options
-		i := 1
-		for i < len(args) && string(args[i])[0] != '$' {
+		// Find GROUP keyword first
+		groupIdx := -1
+		for i := 0; i < len(args); i++ {
+			if strings.ToUpper(string(args[i])) == "GROUP" {
+				groupIdx = i
+				break
+			}
+		}
+		if groupIdx < 0 {
+			return proto.NewError("ERR syntax error, missing GROUP keyword")
+		}
+
+		// Parse options before GROUP
+		i := 0
+		for i < groupIdx {
 			opt := strings.ToUpper(string(args[i]))
+			switch opt {
+			case "COUNT":
+				if i+1 >= groupIdx {
+					return proto.NewError("ERR syntax error")
+				}
+				c, err := strconv.ParseInt(string(args[i+1]), 10, 64)
+				if err != nil {
+					return proto.NewError("ERR value is not an integer")
+				}
+				count = c
+				i += 2
+			case "BLOCK":
+				if i+1 >= groupIdx {
+					return proto.NewError("ERR syntax error")
+				}
+				b, err := strconv.ParseInt(string(args[i+1]), 10, 64)
+				if err != nil {
+					return proto.NewError("ERR value is not an integer")
+				}
+				block = b
+				i += 2
+			default:
+				return proto.NewError(fmt.Sprintf("ERR syntax error, unknown option %s", opt))
+			}
+		}
+
+		// Parse group and consumer
+		if groupIdx+2 >= len(args) {
+			return proto.NewError("ERR syntax error")
+		}
+		group = string(args[groupIdx+1])
+		consumer = string(args[groupIdx+2])
+		i = groupIdx + 3
+
+		// Parse options (COUNT, BLOCK) after group/consumer
+		for i < len(args) {
+			opt := strings.ToUpper(string(args[i]))
+			if opt == "STREAMS" {
+				break
+			}
 			switch opt {
 			case "COUNT":
 				if i+1 >= len(args) {
@@ -3450,21 +3945,9 @@ func (h *Handler) executeCommand(cmd string, args [][]byte) proto.RESP {
 				block = b
 				i += 2
 			default:
-				return proto.NewError(fmt.Sprintf("ERR syntax error, unknown option %s", opt))
+				return proto.NewError(fmt.Sprintf("ERR syntax error, unknown option %s at index %d", opt, i))
 			}
 		}
-
-		// Check for GROUP
-		if i >= len(args) || strings.ToUpper(string(args[i])) != "GROUP" {
-			return proto.NewError("ERR syntax error, missing GROUP keyword")
-		}
-		i++
-		if i+1 >= len(args) {
-			return proto.NewError("ERR syntax error")
-		}
-		group = string(args[i])
-		consumer = string(args[i+1])
-		i += 2
 
 		// Check for STREAMS
 		if i >= len(args) || strings.ToUpper(string(args[i])) != "STREAMS" {
@@ -3474,8 +3957,8 @@ func (h *Handler) executeCommand(cmd string, args [][]byte) proto.RESP {
 
 		// Parse stream IDs
 		remaining := len(args) - i
-		if remaining < 2 || remaining%2 != 1 {
-			return proto.NewError("ERR syntax error")
+		if remaining < 2 || remaining%2 != 0 {
+			return proto.NewError(fmt.Sprintf("ERR syntax error: remaining=%d, i=%d, len(args)=%d", remaining, i, len(args)))
 		}
 		numStreams := remaining / 2
 		streamKeys := make([]string, numStreams)
@@ -3535,6 +4018,70 @@ func (h *Handler) executeCommand(cmd string, args [][]byte) proto.RESP {
 		}
 		return proto.NewInteger(claimed)
 
+	// ==================== XAUTOCLAIM ====================
+	case "XAUTOCLAIM":
+		if len(args) < 5 {
+			return proto.NewError("ERR wrong number of arguments for 'XAUTOCLAIM' command")
+		}
+		key := string(args[0])
+		group := string(args[1])
+		consumer := string(args[2])
+		minIdleTime, err := strconv.ParseInt(string(args[3]), 10, 64)
+		if err != nil {
+			return proto.NewError("ERR value is not an integer")
+		}
+		start := string(args[4])
+
+		// Parse options
+		opts := store.XAutoClaimOptions{Count: 100, JustID: false}
+		i := 5
+		for i < len(args) {
+			opt := strings.ToUpper(string(args[i]))
+			switch opt {
+			case "COUNT":
+				if i+1 >= len(args) {
+					return proto.NewError("ERR syntax error")
+				}
+				count, err := strconv.ParseInt(string(args[i+1]), 10, 64)
+				if err != nil {
+					return proto.NewError("ERR value is not an integer")
+				}
+				opts.Count = count
+				i += 2
+			case "JUSTID":
+				opts.JustID = true
+				i++
+			default:
+				return proto.NewError("ERR syntax error")
+			}
+		}
+
+		result, err := h.Db.XAutoClaim(key, group, consumer, minIdleTime, start, opts)
+		if err != nil {
+			return proto.NewError(fmt.Sprintf("ERR %v", err))
+		}
+
+		// Build response
+		response := make([][]byte, 0)
+		response = append(response, []byte(result.NextID))
+		if opts.JustID {
+			for _, id := range result.ClaimedIDs {
+				response = append(response, []byte(id))
+			}
+		} else {
+			for _, id := range result.ClaimedIDs {
+				response = append(response, []byte(id))
+			}
+			for _, msg := range result.Messages {
+				entry := [][]byte{[]byte("id"), []byte(msg.ID)}
+				for k, v := range msg.Fields {
+					entry = append(entry, []byte(k), []byte(v))
+				}
+				response = append(response, entry...)
+			}
+		}
+		return &proto.Array{Args: response}
+
 	// ==================== XPENDING ====================
 	case "XPENDING":
 		if len(args) < 2 {
@@ -3556,12 +4103,30 @@ func (h *Handler) executeCommand(cmd string, args [][]byte) proto.RESP {
 
 	// ==================== XINFO ====================
 	case "XINFO":
-		if len(args) < 2 {
+		if len(args) < 1 {
 			return proto.NewError("ERR wrong number of arguments for 'XINFO' command")
 		}
 		subcommand := strings.ToUpper(string(args[0]))
 
 		switch subcommand {
+		case "HELP":
+			response := [][]byte{
+				[]byte("XINFO <subcommand> [<arg> ...]"),
+				[]byte("Returns information about streams and consumer groups."),
+				[]byte(""),
+				[]byte("XINFO STREAM <key> [FULL]"),
+				[]byte("  -- Returns information about a stream."),
+				[]byte(""),
+				[]byte("XINFO GROUPS <key>"),
+				[]byte("  -- Returns the consumer groups of a stream."),
+				[]byte(""),
+				[]byte("XINFO CONSUMERS <key> <group>"),
+				[]byte("  -- Returns the consumers of a consumer group."),
+				[]byte(""),
+				[]byte("XINFO STREAM <key> FULL [COUNT <count>]"),
+				[]byte("  -- Returns full information about a stream including entries."),
+			}
+			return &proto.Array{Args: response}
 		case "STREAM":
 			if len(args) < 2 {
 				return proto.NewError("ERR wrong number of arguments for 'XINFO STREAM' command")
@@ -3837,9 +4402,9 @@ func (h *Handler) executeCommand(cmd string, args [][]byte) proto.RESP {
 			// Store as a list
 			for idx, v := range values {
 				if idx == 0 {
-					h.Db.Del(destKey)
+					_, _ = h.Db.Del(destKey)
 				}
-				h.Db.LPush(destKey, v)
+				_, _ = h.Db.LPush(destKey, v)
 			}
 			return proto.NewInteger(int64(len(values)))
 		}
@@ -3872,6 +4437,428 @@ func (h *Handler) executeCommand(cmd string, args [][]byte) proto.RESP {
 		}
 		return proto.NewError("ERR invalid password")
 
+	// ==================== JSON ====================
+	case "JSON.SET":
+		if len(args) < 3 {
+			return proto.NewError("ERR wrong number of arguments for 'JSON.SET' command")
+		}
+		key, path := string(args[0]), string(args[1])
+		value := string(args[2])
+		nx, xx := false, false
+		// Parse optional NX/XX arguments
+		for i := 3; i < len(args); i++ {
+			opt := strings.ToUpper(string(args[i]))
+			if opt == "NX" {
+				nx = true
+			} else if opt == "XX" {
+				xx = true
+			}
+		}
+		result, err := h.Db.JSONSet(key, path, value, nx, xx)
+		if err != nil {
+			return proto.NewError(fmt.Sprintf("ERR %v", err))
+		}
+		return proto.NewSimpleString(result)
+
+	case "JSON.GET":
+		if len(args) < 1 {
+			return proto.NewError("ERR wrong number of arguments for 'JSON.GET' command")
+		}
+		key := string(args[0])
+		paths := make([]string, 0)
+		for i := 1; i < len(args); i++ {
+			paths = append(paths, string(args[i]))
+		}
+		result, err := h.Db.JSONGet(key, paths...)
+		if err != nil {
+			if errors.Is(err, store.ErrKeyNotFound) {
+				return proto.NewBulkString(nil)
+			}
+			return proto.NewError(fmt.Sprintf("ERR %v", err))
+		}
+		if len(result) == 1 {
+			return proto.NewBulkString([]byte(result[0]))
+		}
+		// Multiple paths
+		arr := make([][]byte, len(result))
+		for i, v := range result {
+			arr[i] = []byte(v)
+		}
+		return &proto.Array{Args: arr}
+
+	case "JSON.DEL":
+		if len(args) < 1 {
+			return proto.NewError("ERR wrong number of arguments for 'JSON.DEL' command")
+		}
+		key := string(args[0])
+		paths := make([]string, 0)
+		for i := 1; i < len(args); i++ {
+			paths = append(paths, string(args[i]))
+		}
+		count, err := h.Db.JSONDel(key, paths...)
+		if err != nil {
+			return proto.NewError(fmt.Sprintf("ERR %v", err))
+		}
+		return proto.NewInteger(count)
+
+	case "JSON.TYPE":
+		if len(args) < 1 {
+			return proto.NewError("ERR wrong number of arguments for 'JSON.TYPE' command")
+		}
+		key := string(args[0])
+		path := "$"
+		if len(args) >= 2 {
+			path = string(args[1])
+		}
+		result, err := h.Db.JSONType(key, path)
+		if err != nil {
+			if errors.Is(err, store.ErrKeyNotFound) {
+				return proto.NewBulkString(nil)
+			}
+			return proto.NewError(fmt.Sprintf("ERR %v", err))
+		}
+		return proto.NewBulkString([]byte(result))
+
+	case "JSON.MGET":
+		if len(args) < 2 {
+			return proto.NewError("ERR wrong number of arguments for 'JSON.MGET' command")
+		}
+		path := string(args[len(args)-1])
+		keys := make([]string, 0)
+		for i := 0; i < len(args)-1; i++ {
+			keys = append(keys, string(args[i]))
+		}
+		result, err := h.Db.JSONMGet(path, keys...)
+		if err != nil {
+			return proto.NewError(fmt.Sprintf("ERR %v", err))
+		}
+		arr := make([][]byte, len(result))
+		for i, v := range result {
+			if v == "" {
+				arr[i] = nil
+			} else {
+				arr[i] = []byte(v)
+			}
+		}
+		return &proto.Array{Args: arr}
+
+	case "JSON.ARRAPPEND":
+		if len(args) < 3 {
+			return proto.NewError("ERR wrong number of arguments for 'JSON.ARRAPPEND' command")
+		}
+		key, path := string(args[0]), string(args[1])
+		values := make([]string, 0)
+		for i := 2; i < len(args); i++ {
+			values = append(values, string(args[i]))
+		}
+		count, err := h.Db.JSONArrAppend(key, path, values...)
+		if err != nil {
+			return proto.NewError(fmt.Sprintf("ERR %v", err))
+		}
+		return proto.NewInteger(count)
+
+	case "JSON.ARRLEN":
+		if len(args) < 1 {
+			return proto.NewError("ERR wrong number of arguments for 'JSON.ARRLEN' command")
+		}
+		key := string(args[0])
+		path := "$"
+		if len(args) >= 2 {
+			path = string(args[1])
+		}
+		count, err := h.Db.JSONArrLen(key, path)
+		if err != nil {
+			return proto.NewError(fmt.Sprintf("ERR %v", err))
+		}
+		return proto.NewInteger(count)
+
+	case "JSON.OBJKEYS":
+		if len(args) < 1 {
+			return proto.NewError("ERR wrong number of arguments for 'JSON.OBJKEYS' command")
+		}
+		key := string(args[0])
+		path := "$"
+		if len(args) >= 2 {
+			path = string(args[1])
+		}
+		keys, err := h.Db.JSONObjKeys(key, path)
+		if err != nil {
+			return proto.NewError(fmt.Sprintf("ERR %v", err))
+		}
+		arr := make([][]byte, len(keys))
+		for i, k := range keys {
+			arr[i] = []byte(k)
+		}
+		return &proto.Array{Args: arr}
+
+	case "JSON.NUMINCRBY":
+		if len(args) < 3 {
+			return proto.NewError("ERR wrong number of arguments for 'JSON.NUMINCRBY' command")
+		}
+		key, path := string(args[0]), string(args[1])
+		increment, err := strconv.ParseFloat(string(args[2]), 64)
+		if err != nil {
+			return proto.NewError("ERR increment must be a valid number")
+		}
+		result, err := h.Db.JSONNumIncrBy(key, path, increment)
+		if err != nil {
+			return proto.NewError(fmt.Sprintf("ERR %v", err))
+		}
+		return proto.NewBulkString([]byte(strconv.FormatFloat(result, 'f', -1, 64)))
+
+	case "JSON.NUMMULTBY":
+		if len(args) < 3 {
+			return proto.NewError("ERR wrong number of arguments for 'JSON.NUMMULTBY' command")
+		}
+		key, path := string(args[0]), string(args[1])
+		multiplier, err := strconv.ParseFloat(string(args[2]), 64)
+		if err != nil {
+			return proto.NewError("ERR multiplier must be a valid number")
+		}
+		result, err := h.Db.JSONNumMultBy(key, path, multiplier)
+		if err != nil {
+			return proto.NewError(fmt.Sprintf("ERR %v", err))
+		}
+		return proto.NewBulkString([]byte(strconv.FormatFloat(result, 'f', -1, 64)))
+
+	case "JSON.CLEAR":
+		if len(args) < 1 {
+			return proto.NewError("ERR wrong number of arguments for 'JSON.CLEAR' command")
+		}
+		key := string(args[0])
+		path := "$"
+		if len(args) >= 2 {
+			path = string(args[1])
+		}
+		count, err := h.Db.JSONClear(key, path)
+		if err != nil {
+			return proto.NewError(fmt.Sprintf("ERR %v", err))
+		}
+		return proto.NewInteger(count)
+
+	case "JSON.DEBUG":
+		if len(args) < 2 {
+			return proto.NewError("ERR wrong number of arguments for 'JSON.DEBUG' command")
+		}
+		subCmd := strings.ToUpper(string(args[0]))
+		if subCmd != "MEMORY" {
+			return proto.NewError("ERR syntax error")
+		}
+		key := string(args[1])
+		path := "$"
+		if len(args) >= 3 {
+			path = string(args[2])
+		}
+		memory, err := h.Db.JSONDebugMemory(key, path)
+		if err != nil {
+			if errors.Is(err, store.ErrKeyNotFound) {
+				return proto.NewBulkString(nil)
+			}
+			return proto.NewError(fmt.Sprintf("ERR %v", err))
+		}
+		return proto.NewInteger(memory)
+
+	// ==================== Time Series ====================
+	case "TS.CREATE":
+		if len(args) < 1 {
+			return proto.NewError("ERR wrong number of arguments for 'TS.CREATE' command")
+		}
+		key := string(args[0])
+		opts := store.TSCreateOptions{}
+		i := 1
+		for i < len(args) {
+			opt := strings.ToUpper(string(args[i]))
+			switch opt {
+			case "RETENTION":
+				i++
+				if i >= len(args) {
+					return proto.NewError("ERR syntax error")
+				}
+				retention, err := strconv.ParseInt(string(args[i]), 10, 64)
+				if err != nil {
+					return proto.NewError("ERR invalid RETENTION value")
+				}
+				opts.Retention = retention
+			case "ENCODING":
+				i++
+				if i >= len(args) {
+					return proto.NewError("ERR syntax error")
+				}
+				opts.Encoding = string(args[i])
+			case "DUPLICATE_POLICY":
+				i++
+				if i >= len(args) {
+					return proto.NewError("ERR syntax error")
+				}
+				opts.DuplicatePolicy = string(args[i])
+			default:
+				return proto.NewError(fmt.Sprintf("ERR syntax error, unexpected option: %s", opt))
+			}
+			i++
+		}
+		if err := h.Db.TSCreate(key, opts); err != nil {
+			return proto.NewError(fmt.Sprintf("ERR %v", err))
+		}
+		return proto.OK
+
+	case "TS.ADD":
+		if len(args) < 3 {
+			return proto.NewError("ERR wrong number of arguments for 'TS.ADD' command")
+		}
+		key := string(args[0])
+		var timestamp int64
+		if string(args[1]) == "*" {
+			timestamp = time.Now().UnixNano() / int64(time.Millisecond)
+		} else {
+			var err error
+			timestamp, err = strconv.ParseInt(string(args[1]), 10, 64)
+			if err != nil {
+				return proto.NewError("ERR invalid timestamp")
+			}
+		}
+		value, err := strconv.ParseFloat(string(args[2]), 64)
+		if err != nil {
+			return proto.NewError("ERR invalid value")
+		}
+		opts := store.TSAddOptions{}
+		if len(args) > 3 {
+			opt := strings.ToUpper(string(args[3]))
+			if opt == "ON_DUPLICATE" && len(args) > 4 {
+				opts.OnDuplicate = string(args[4])
+			}
+		}
+		ts, err := h.Db.TSAdd(key, timestamp, value, opts)
+		if err != nil {
+			return proto.NewError(fmt.Sprintf("ERR %v", err))
+		}
+		return proto.NewInteger(ts)
+
+	case "TS.GET":
+		if len(args) < 1 {
+			return proto.NewError("ERR wrong number of arguments for 'TS.GET' command")
+		}
+		key := string(args[0])
+		dp, err := h.Db.TSGet(key)
+		if err != nil {
+			if errors.Is(err, store.ErrKeyNotFound) {
+				return proto.NewBulkString(nil)
+			}
+			return proto.NewError(fmt.Sprintf("ERR %v", err))
+		}
+		// Return as array: [timestamp, value]
+		return &proto.Array{
+			Args: [][]byte{
+				[]byte(strconv.FormatInt(dp.Timestamp, 10)),
+				[]byte(strconv.FormatFloat(dp.Value, 'f', -1, 64)),
+			},
+		}
+
+	case "TS.RANGE":
+		if len(args) < 3 {
+			return proto.NewError("ERR wrong number of arguments for 'TS.RANGE' command")
+		}
+		key := string(args[0])
+		start := string(args[1])
+		stop := string(args[2])
+		count := int64(-1)
+		if len(args) > 3 {
+			opt := strings.ToUpper(string(args[3]))
+			if opt == "COUNT" && len(args) > 4 {
+				c, err := strconv.ParseInt(string(args[4]), 10, 64)
+				if err != nil {
+					return proto.NewError("ERR invalid COUNT value")
+				}
+				count = c
+			}
+		}
+		results, err := h.Db.TSRange(key, start, stop, count)
+		if err != nil {
+			return proto.NewError(fmt.Sprintf("ERR %v", err))
+		}
+		arr := make([][]byte, 0, len(results)*2)
+		for _, dp := range results {
+			arr = append(arr, []byte(strconv.FormatInt(dp.Timestamp, 10)))
+			arr = append(arr, []byte(strconv.FormatFloat(dp.Value, 'f', -1, 64)))
+		}
+		return &proto.Array{Args: arr}
+
+	case "TS.DEL":
+		if len(args) < 3 {
+			return proto.NewError("ERR wrong number of arguments for 'TS.DEL' command")
+		}
+		key := string(args[0])
+		start := string(args[1])
+		stop := string(args[2])
+		deleted, err := h.Db.TSDel(key, start, stop)
+		if err != nil {
+			return proto.NewError(fmt.Sprintf("ERR %v", err))
+		}
+		return proto.NewInteger(deleted)
+
+	case "TS.INFO":
+		if len(args) < 1 {
+			return proto.NewError("ERR wrong number of arguments for 'TS.INFO' command")
+		}
+		key := string(args[0])
+		info, err := h.Db.TSInfo(key)
+		if err != nil {
+			if errors.Is(err, store.ErrKeyNotFound) {
+				return proto.NewBulkString(nil)
+			}
+			return proto.NewError(fmt.Sprintf("ERR %v", err))
+		}
+		// Return as array of key-value pairs
+		return &proto.Array{
+			Args: [][]byte{
+				[]byte("totalSamples"), []byte(strconv.FormatInt(info.TotalSamples, 10)),
+				[]byte("memoryUsage"), []byte(strconv.FormatInt(info.MemoryUsage, 10)),
+				[]byte("firstTimestamp"), []byte(strconv.FormatInt(info.FirstTimestamp, 10)),
+				[]byte("lastTimestamp"), []byte(strconv.FormatInt(info.LastTimestamp, 10)),
+				[]byte("retentionTime"), []byte(strconv.FormatInt(info.RetentionTime, 10)),
+				[]byte("encoding"), []byte(info.Encoding),
+				[]byte("chunkCount"), []byte(strconv.FormatInt(info.ChunkCount, 10)),
+			},
+		}
+
+	case "TS.LEN":
+		if len(args) < 1 {
+			return proto.NewError("ERR wrong number of arguments for 'TS.LEN' command")
+		}
+		key := string(args[0])
+		length, err := h.Db.TSLen(key)
+		if err != nil {
+			if errors.Is(err, store.ErrKeyNotFound) {
+				return proto.NewBulkString(nil)
+			}
+			return proto.NewError(fmt.Sprintf("ERR %v", err))
+		}
+		return proto.NewInteger(length)
+
+	case "TS.MGET":
+		if len(args) < 2 {
+			return proto.NewError("ERR wrong number of arguments for 'TS.MGET' command")
+		}
+		filter := string(args[0])
+		keys := make([]string, len(args)-1)
+		for i := 1; i < len(args); i++ {
+			keys[i-1] = string(args[i])
+		}
+		results, err := h.Db.TSMGet(filter, keys...)
+		if err != nil {
+			return proto.NewError(fmt.Sprintf("ERR %v", err))
+		}
+		arr := make([][]byte, 0, len(results)*2)
+		for _, dp := range results {
+			if dp == nil {
+				arr = append(arr, []byte{})
+				arr = append(arr, []byte{})
+			} else {
+				arr = append(arr, []byte(strconv.FormatInt(dp.Timestamp, 10)))
+				arr = append(arr, []byte(strconv.FormatFloat(dp.Value, 'f', -1, 64)))
+			}
+		}
+		return &proto.Array{Args: arr}
+
 	default:
 		// 如果在事务中，将命令加入队列
 		if h.transaction != nil {
@@ -3890,6 +4877,57 @@ func boolToInt(b bool) int {
 		return 1
 	}
 	return 0
+}
+
+// parseScore parses Redis-style score bounds including special values
+// Supports: "-inf", "+inf", "(", "[", and numeric values
+func parseScore(s string) (float64, error) {
+	// 处理特殊值
+	switch s {
+	case "-inf":
+		return float64(math.Inf(-1)), nil
+	case "+inf", "inf":
+		return float64(math.Inf(1)), nil
+	case "-inf(", "-inf[":
+		// Exclusive -inf is same as inclusive -inf for float comparison
+		return float64(math.Inf(-1)), nil
+	case "+inf(", "+inf[":
+		return float64(math.Inf(1)), nil
+	}
+
+	// 处理带括号的排除边界 (value
+	if len(s) > 0 && s[0] == '(' {
+		// 对于排除边界，我们需要在比较时特殊处理
+		// 这里简单处理，返回原值的前缀（不包括括号）
+		s = s[1:]
+	}
+
+	return strconv.ParseFloat(s, 64)
+}
+
+// parseScoreExclusive checks if a score string represents an exclusive bound
+func parseScoreExclusive(s string) (float64, bool, error) {
+	exclusive := false
+	if len(s) > 0 && s[0] == '(' {
+		exclusive = true
+		s = s[1:]
+	} else if len(s) > 0 && s[0] == '[' {
+		exclusive = false
+		s = s[1:]
+	}
+
+	val, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		// 检查特殊值
+		switch s {
+		case "-inf":
+			return float64(math.Inf(-1)), exclusive, nil
+		case "+inf", "inf":
+			return float64(math.Inf(1)), exclusive, nil
+		}
+		return 0, false, err
+	}
+	return val, exclusive, nil
 }
 
 // executeQueuedCommand 执行事务队列中的命令
@@ -4140,7 +5178,7 @@ func (h *Handler) copyList(srcKey, dstKey string) bool {
 		return false
 	}
 	// 先删除目标
-	h.Db.Del(dstKey)
+	_, _ = h.Db.Del(dstKey)
 	// 添加到目标列表
 	_, err = h.Db.RPush(dstKey, items...)
 	return err == nil
@@ -4156,7 +5194,7 @@ func (h *Handler) copyHash(srcKey, dstKey string) bool {
 		return true
 	}
 	// 先删除目标
-	h.Db.Del(dstKey)
+	_, _ = h.Db.Del(dstKey)
 	// 设置所有字段
 	for k, v := range data {
 		if err := h.Db.HSet(dstKey, k, v); err != nil {
@@ -4176,7 +5214,7 @@ func (h *Handler) copySet(srcKey, dstKey string) bool {
 		return true
 	}
 	// 先删除目标
-	h.Db.Del(dstKey)
+	_, _ = h.Db.Del(dstKey)
 	// 添加所有成员
 	_, err = h.Db.SAdd(dstKey, members...)
 	return err == nil
@@ -4192,7 +5230,7 @@ func (h *Handler) copySortedSet(srcKey, dstKey string) bool {
 		return true
 	}
 	// 先删除目标
-	h.Db.Del(dstKey)
+	_, _ = h.Db.Del(dstKey)
 	// 添加所有成员
 	zMembers := make([]store.ZSetMember, len(members))
 	for i, m := range members {

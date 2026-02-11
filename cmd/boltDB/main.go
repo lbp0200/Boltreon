@@ -34,6 +34,11 @@ func main() {
 		}
 	}()
 
+	// 启动时恢复数据状态
+	if err := db.NextStartup(); err != nil {
+		logger.Logger.Error().Err(err).Msg("Failed to run nextStartup")
+	}
+
 	// 初始化复制管理器
 	replMgr := replication.NewReplicationManager(db)
 

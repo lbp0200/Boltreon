@@ -1,6 +1,7 @@
 package store
 
 import (
+	"sync"
 	"time"
 
 	"github.com/dgraph-io/badger/v4"
@@ -8,11 +9,13 @@ import (
 
 const (
 	//UnderScore       = "_"
-	KeyTypeString = "STRING"
-	KeyTypeList   = "LIST"
-	KeyTypeHash   = "HASH"
-	KeyTypeSet    = "SET"
-	//KeyTypeSortedSet = "SORTEDSET"
+	KeyTypeString     = "STRING"
+	KeyTypeList       = "LIST"
+	KeyTypeHash       = "HASH"
+	KeyTypeSet        = "SET"
+	KeyTypeJSON       = "JSON"
+	KeyTypeTimeSeries = "TIMESERIES"
+	//KeyTypeSortedSet = "SORTEDSET" - defined in sorted_set.go as "zset"
 	//
 	//sortedSetIndex = "_INDEX_"
 	//sortedSetData  = "_DATA_"
@@ -21,14 +24,37 @@ const (
 var (
 	prefixKeyTypeBytes = []byte("TYPE_")
 	//prefixKeySortedSetBytes = []byte("SORTEDSET_")
+	prefixKeyJSONBytes      = []byte("JSON:")
+	prefixKeyTimeSeriesBytes = []byte("TS:")
 )
 
+// BlockingResult represents the result of a blocking pop operation
+type BlockingResult struct {
+	Key   string
+	Value string
+}
+
+// StreamReadResult represents the result of a stream read operation
+type StreamReadResult struct {
+	Key     string
+	Entries []StreamEntry
+}
+
+// BotreonStore is the main store structure
 type BotreonStore struct {
 	db              *badger.DB
 	compressionType CompressionType
 	// 缓存层
 	readCache  *LRUCache // 读缓存（用于 GET、HGET 等读操作）
 	writeCache *LRUCache // 写缓存（用于 SET、HSET 等写操作，减少磁盘写入）
+
+	// Blocking queue support
+	blockingMu     sync.RWMutex
+	blockingPopChans map[string][]chan BlockingResult // key -> channels waiting for data
+
+	// Stream blocking support
+	streamBlockingMu     sync.RWMutex
+	streamBlockingChans map[string][]chan StreamReadResult // key -> channels waiting for stream data
 }
 
 // NewBotreonStore 创建新的BotreonStore实例
@@ -84,6 +110,8 @@ func NewBotreonStoreWithCompression(path string, compressionType CompressionType
 		compressionType: compressionType,
 		readCache:       readCache,
 		writeCache:      writeCache,
+		blockingPopChans:  make(map[string][]chan BlockingResult),
+		streamBlockingChans: make(map[string][]chan StreamReadResult),
 	}, nil
 }
 

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-BoltDB is a disk-persistent Redis-compatible database written in Go, using BadgerDB for storage. It overcomes Redis's memory limitations by supporting up to 100TB of data on disk while maintaining Redis protocol compatibility.
+BoltDB is a disk-persistent Redis-compatible database written in Go, using BadgerDB for storage. It overcomes Redis's memory limitations by supporting up to 100TB of data on disk while maintaining Redis 8 protocol compatibility.
 
 ## Common Commands
 
@@ -88,6 +88,7 @@ Key imports: `github.com/dgraph-io/badger/v4`, `github.com/redis/go-redis/v9`, `
 
 - 尽量兼容redis，如果实在做不到，在README文件中说明
 - 尽量做全测试，GitHub Actions中只执行单元测试，集成测试放入`cmd/integration`中，包括所有支持的redis命令，主从模式、哨兵模式、集群模式。
+- 编译生成的文件，都放入build文件夹，防止污染git
 - When implementing Redis commands, return `int64` for counts (DEL, INCR, etc.)
 - For TTL commands, `ExpiresAt()` returns `uint64` nanoseconds Unix timestamp
 - go-redis client wraps TTL responses in `time.Duration` (multiply by precision)

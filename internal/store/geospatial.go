@@ -451,8 +451,8 @@ func (s *BotreonStore) GeoRadius(key string, lon, lat, radius float64, unit stri
 	centerHash := encodeGeoHash(lat, lon)
 
 	// Get bounding box with expansion
-	minLat, maxLat, minLon, maxLon := geoHashToBoundingBox(centerHash)
-	minLat, maxLat, minLon, maxLon = expandBoundingBox(minLat, maxLat, minLon, maxLon, radiusM)
+	minLat, _, minLon, _ := geoHashToBoundingBox(centerHash)
+	minLat, minLon, _, _ = expandBoundingBox(minLat, minLat, minLon, minLon, radiusM)
 
 	// Convert to score range (geohash)
 	minScore := float64(encodeGeoHash(minLat, minLon))

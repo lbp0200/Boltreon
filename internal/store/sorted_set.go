@@ -1362,3 +1362,78 @@ func (s *BotreonStore) BZPopMin(keys []string, timeout int) (string, *ZSetMember
 	}
 	return "", nil, nil
 }
+
+// ZScanResult 定义 ZSCAN 命令的返回结果
+type ZScanResult struct {
+	Cursor  uint64
+	Members []ZSetMember
+}
+
+// ZScan 实现 Redis ZSCAN 命令，增量迭代有序集合的成员
+func (s *BotreonStore) ZScan(zSetName string, cursor uint64, pattern string, count int) (ZScanResult, error) {
+	var result ZScanResult
+	result.Cursor = 0
+	result.Members = []ZSetMember{}
+
+	if count <= 0 {
+		count = 10 // 默认值
+	}
+
+	err := s.db.View(func(txn *badger.Txn) error {
+		opts := badger.DefaultIteratorOptions
+		prefix := keyBadgerGet(prefixKeySortedSetBytes, []byte(zSetName+sortedSetIndex))
+		opts.Prefix = prefix
+		opts.PrefetchValues = false
+
+		iter := txn.NewIterator(opts)
+		defer iter.Close()
+
+		currentPos := uint64(0)
+		collected := 0
+
+		// 如果cursor不为0，需要跳过前面的成员
+		if cursor > 0 {
+			for iter.Seek(prefix); iter.ValidForPrefix(prefix) && currentPos < cursor; iter.Next() {
+				currentPos++
+			}
+		} else {
+			iter.Seek(prefix)
+		}
+
+		// 收集匹配的成员
+		for iter.ValidForPrefix(prefix) && collected < count {
+			item := iter.Item()
+			key := item.Key()
+
+			// 解析键格式: zset:zSetName:index:scoreBytes:member:versionBytes
+			keyWithoutPrefix := key[len(prefixKeySortedSetBytes):]
+			keyParts := bytes.Split(keyWithoutPrefix, []byte(":"))
+			if len(keyParts) >= 4 {
+				scoreBytes := keyParts[2]
+				member := string(keyParts[3])
+
+				if len(scoreBytes) == 8 {
+					score := decodeScore(scoreBytes)
+
+					if pattern == "" || pattern == "*" || matchPattern(member, pattern) {
+						result.Members = append(result.Members, ZSetMember{Member: member, Score: score})
+						collected++
+					}
+				}
+			}
+
+			currentPos++
+			iter.Next()
+		}
+
+		// 检查是否还有更多成员
+		if iter.ValidForPrefix(prefix) {
+			result.Cursor = currentPos
+		} else {
+			result.Cursor = 0 // 0表示迭代完成
+		}
+
+		return nil
+	})
+	return result, err
+}

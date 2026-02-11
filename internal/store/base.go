@@ -69,6 +69,20 @@ func (s *BotreonStore) Del(key string) (int64, error) {
 			if err := txn.Delete(typeKey); err != nil {
 				return err
 			}
+		case KeyTypeJSON:
+			if err := txn.Delete([]byte(s.jsonKey(key))); err != nil {
+				return err
+			}
+			if err := txn.Delete(typeKey); err != nil {
+				return err
+			}
+		case KeyTypeTimeSeries:
+			if err := deleteByPrefix(txn, []byte(fmt.Sprintf("%s%s:", prefixTS, key))); err != nil {
+				return err
+			}
+			if err := txn.Delete(typeKey); err != nil {
+				return err
+			}
 		default:
 			if err := txn.Delete(typeKey); err != nil {
 				return err
@@ -136,6 +150,12 @@ func (s *BotreonStore) getKeyValueKey(key string, keyType string) ([]byte, error
 	case KeyTypeSortedSet:
 		// SortedSet的主键是meta键
 		return sortedSetKeyMeta(key), nil
+	case KeyTypeJSON:
+		// JSON的主键就是json键
+		return []byte(s.jsonKey(key)), nil
+	case KeyTypeTimeSeries:
+		// TimeSeries的主键是meta键
+		return tsMetaKey(key), nil
 	default:
 		return nil, fmt.Errorf("unknown key type: %s", keyType)
 	}
@@ -189,6 +209,10 @@ func (s *BotreonStore) Type(key string) (string, error) {
 			keyType = "set"
 		case KeyTypeSortedSet:
 			keyType = "zset"
+		case KeyTypeJSON:
+			keyType = "json"
+		case KeyTypeTimeSeries:
+			keyType = "ts"
 		default:
 			keyType = "none"
 		}
@@ -1180,4 +1204,392 @@ func (s *BotreonStore) Time() (int64, int64, error) {
 	sec := now.Unix()
 	usec := int64(now.Nanosecond() / 1000)
 	return sec, usec, nil
+}
+
+// nextStartup 在服务启动时执行，恢复数据状态
+// 功能：
+// 1. 清理过期键
+// 2. 清理孤立数据（没有TYPE_键的数据）
+// 3. 清理孤立TYPE_键（没有对应数据的TYPE_键）
+func (s *BotreonStore) NextStartup() error {
+	return s.db.Update(func(txn *badger.Txn) error {
+		// 1. 清理孤立TYPE_键（没有对应数据的TYPE_键）
+		iter := txn.NewIterator(badger.DefaultIteratorOptions)
+		defer iter.Close()
+
+		prefix := prefixKeyTypeBytes
+		for iter.Seek(prefix); iter.ValidForPrefix(prefix); iter.Next() {
+			item := iter.Item()
+			keyBytes := item.KeyCopy(nil)
+			key := string(keyBytes[len(prefixKeyTypeBytes):])
+
+			// 获取类型
+			val, err := item.ValueCopy(nil)
+			if err != nil {
+				continue
+			}
+			keyType := string(val)
+
+			// 检查对应的数据是否存在
+			exists, err := s.checkDataExists(txn, key, keyType)
+			if err != nil {
+				continue
+			}
+			if !exists {
+				// 删除孤立TYPE_键
+				if err := txn.Delete(keyBytes); err != nil {
+					// 记录日志但继续处理
+					continue
+				}
+			}
+		}
+
+		// 2. 清理孤立数据（没有TYPE_键的数据）
+		// String: string:key
+		if err := cleanupOrphanedData(txn, []byte("string:")); err != nil {
+			// 记录日志
+		}
+		// List: list:key:
+		if err := cleanupOrphanedListData(txn); err != nil {
+			// 记录日志
+		}
+		// Hash: hash:key:field
+		if err := cleanupOrphanedHashData(txn); err != nil {
+			// 记录日志
+		}
+		// Set: set:key:member
+		if err := cleanupOrphanedSetData(txn); err != nil {
+			// 记录日志
+		}
+		// SortedSet: zset:key:*
+		if err := cleanupOrphanedZSetData(txn); err != nil {
+			// 记录日志
+		}
+
+		return nil
+	})
+}
+
+// checkDataExists 检查指定键的数据是否存在
+func (s *BotreonStore) checkDataExists(txn *badger.Txn, key, keyType string) (bool, error) {
+	switch keyType {
+	case KeyTypeString:
+		strKey := s.stringKey(key)
+		_, err := txn.Get([]byte(strKey))
+		if errors.Is(err, badger.ErrKeyNotFound) {
+			return false, nil
+		}
+		return err == nil, err
+	case KeyTypeList:
+		// List检查length键
+		lengthKey := []byte(fmt.Sprintf("%s:%s:length", KeyTypeList, key))
+		_, err := txn.Get(lengthKey)
+		if errors.Is(err, badger.ErrKeyNotFound) {
+			return false, nil
+		}
+		return err == nil, err
+	case KeyTypeHash:
+		// Hash检查count键
+		countKey := []byte(fmt.Sprintf("%s:%s:count", KeyTypeHash, key))
+		_, err := txn.Get(countKey)
+		if errors.Is(err, badger.ErrKeyNotFound) {
+			return false, nil
+		}
+		return err == nil, err
+	case KeyTypeSet:
+		// Set检查count键
+		countKey := s.setKey(key, "count")
+		_, err := txn.Get([]byte(countKey))
+		if errors.Is(err, badger.ErrKeyNotFound) {
+			return false, nil
+		}
+		return err == nil, err
+	case "zset":
+		// SortedSet检查meta键
+		metaKey := sortedSetKeyMeta(key)
+		_, err := txn.Get(metaKey)
+		if errors.Is(err, badger.ErrKeyNotFound) {
+			return false, nil
+		}
+		return err == nil, err
+	case KeyTypeJSON:
+		// JSON检查json键
+		jsonKey := []byte(s.jsonKey(key))
+		_, err := txn.Get(jsonKey)
+		if errors.Is(err, badger.ErrKeyNotFound) {
+			return false, nil
+		}
+		return err == nil, err
+	case KeyTypeTimeSeries:
+		// TimeSeries检查meta键
+		metaKey := tsMetaKey(key)
+		_, err := txn.Get(metaKey)
+		if errors.Is(err, badger.ErrKeyNotFound) {
+			return false, nil
+		}
+		return err == nil, err
+	default:
+		return true, nil
+	}
+}
+
+// cleanupOrphanedData 清理没有TYPE_键的String数据
+func cleanupOrphanedData(txn *badger.Txn, dataPrefix []byte) error {
+	iter := txn.NewIterator(badger.DefaultIteratorOptions)
+	defer iter.Close()
+
+	for iter.Seek(dataPrefix); iter.ValidForPrefix(dataPrefix); iter.Next() {
+		item := iter.Item()
+		keyBytes := item.KeyCopy(nil)
+
+		// 从key中提取实际键名
+		// 格式: string:key
+		key := string(keyBytes[len("string:"):])
+
+		// 检查TYPE_键是否存在
+		typeKey := TypeOfKeyGet(key)
+		_, err := txn.Get(typeKey)
+		if errors.Is(err, badger.ErrKeyNotFound) {
+			// 没有TYPE_键，删除这个数据
+			if err := txn.Delete(keyBytes); err != nil {
+				continue
+			}
+		}
+	}
+	return nil
+}
+
+// cleanupOrphanedListData 清理没有TYPE_键的List数据
+func cleanupOrphanedListData(txn *badger.Txn) error {
+	iter := txn.NewIterator(badger.DefaultIteratorOptions)
+	defer iter.Close()
+
+	prefix := []byte(fmt.Sprintf("%s:", KeyTypeList))
+	for iter.Seek(prefix); iter.ValidForPrefix(prefix); iter.Next() {
+		item := iter.Item()
+		keyBytes := item.KeyCopy(nil)
+		keyStr := string(keyBytes)
+
+		// 提取键名：list:key:field -> key
+		// 格式: list:key:length 或 list:key:index
+		parts := strings.SplitN(keyStr, ":", 3)
+		if len(parts) < 2 {
+			continue
+		}
+		key := parts[1]
+
+		// 检查TYPE_键是否存在
+		typeKey := TypeOfKeyGet(key)
+		_, err := txn.Get(typeKey)
+		if errors.Is(err, badger.ErrKeyNotFound) {
+			// 删除整个list的数据
+			listPrefix := []byte(fmt.Sprintf("%s:%s:", KeyTypeList, key))
+			if err := deleteByPrefix(txn, listPrefix); err != nil {
+				continue
+			}
+		}
+	}
+	return nil
+}
+
+// cleanupOrphanedHashData 清理没有TYPE_键的Hash数据
+func cleanupOrphanedHashData(txn *badger.Txn) error {
+	iter := txn.NewIterator(badger.DefaultIteratorOptions)
+	defer iter.Close()
+
+	prefix := []byte(fmt.Sprintf("%s:", KeyTypeHash))
+	for iter.Seek(prefix); iter.ValidForPrefix(prefix); iter.Next() {
+		item := iter.Item()
+		keyBytes := item.KeyCopy(nil)
+		keyStr := string(keyBytes)
+
+		// 格式: hash:key:field 或 hash:key:count
+		parts := strings.SplitN(keyStr, ":", 3)
+		if len(parts) < 2 {
+			continue
+		}
+		key := parts[1]
+
+		// 检查TYPE_键是否存在
+		typeKey := TypeOfKeyGet(key)
+		_, err := txn.Get(typeKey)
+		if errors.Is(err, badger.ErrKeyNotFound) {
+			// 删除整个hash的数据
+			hashPrefix := []byte(fmt.Sprintf("%s:%s:", KeyTypeHash, key))
+			if err := deleteByPrefix(txn, hashPrefix); err != nil {
+				continue
+			}
+		}
+	}
+	return nil
+}
+
+// cleanupOrphanedSetData 清理没有TYPE_键的Set数据
+func cleanupOrphanedSetData(txn *badger.Txn) error {
+	iter := txn.NewIterator(badger.DefaultIteratorOptions)
+	defer iter.Close()
+
+	prefix := []byte(fmt.Sprintf("%s:", KeyTypeSet))
+	for iter.Seek(prefix); iter.ValidForPrefix(prefix); iter.Next() {
+		item := iter.Item()
+		keyBytes := item.KeyCopy(nil)
+		keyStr := string(keyBytes)
+
+		// 格式: set:key:member 或 set:key:count
+		parts := strings.SplitN(keyStr, ":", 3)
+		if len(parts) < 2 {
+			continue
+		}
+		key := parts[1]
+
+		// 检查TYPE_键是否存在
+		typeKey := TypeOfKeyGet(key)
+		_, err := txn.Get(typeKey)
+		if errors.Is(err, badger.ErrKeyNotFound) {
+			// 删除整个set的数据
+			setPrefix := []byte(fmt.Sprintf("%s:%s:", KeyTypeSet, key))
+			if err := deleteByPrefix(txn, setPrefix); err != nil {
+				continue
+			}
+		}
+	}
+	return nil
+}
+
+// cleanupOrphanedZSetData 清理没有TYPE_键的SortedSet数据
+func cleanupOrphanedZSetData(txn *badger.Txn) error {
+	iter := txn.NewIterator(badger.DefaultIteratorOptions)
+	defer iter.Close()
+
+	prefix := []byte(prefixKeySortedSetBytes)
+	for iter.Seek(prefix); iter.ValidForPrefix(prefix); iter.Next() {
+		item := iter.Item()
+		keyBytes := item.KeyCopy(nil)
+		keyStr := string(keyBytes)
+
+		// 格式: zset:key:meta, zset:key:index:*, zset:key:data:member
+		// 提取键名
+		parts := strings.SplitN(keyStr, ":", 3)
+		if len(parts) < 2 {
+			continue
+		}
+		key := parts[1]
+
+		// 检查TYPE_键是否存在
+		typeKey := TypeOfKeyGet(key)
+		_, err := txn.Get(typeKey)
+		if errors.Is(err, badger.ErrKeyNotFound) {
+			// 删除整个zset的数据
+			zsetPrefix := []byte(fmt.Sprintf("%s%s:", prefixKeySortedSetBytes, key))
+			if err := deleteByPrefix(txn, zsetPrefix); err != nil {
+				continue
+			}
+		}
+	}
+	return nil
+}
+
+// MemoryUsage estimates the memory usage of a key in bytes
+// This is an approximation since BadgerDB manages memory internally
+func (s *BotreonStore) MemoryUsage(key string) (int64, error) {
+	var size int64
+
+	err := s.db.View(func(txn *badger.Txn) error {
+		// Get the type key first
+		typeKey := TypeOfKeyGet(key)
+		item, err := txn.Get(typeKey)
+		if errors.Is(err, badger.ErrKeyNotFound) {
+			return ErrKeyNotFound
+		}
+		if err != nil {
+			return err
+		}
+
+		// Add size of type key
+		size += int64(len(typeKey))
+
+		valCopy, err := item.ValueCopy(nil)
+		if err != nil {
+			return err
+		}
+		keyType := string(valCopy)
+		size += int64(len(valCopy))
+
+		// Get the actual value key based on type
+		valueKey, err := s.getKeyValueKey(key, keyType)
+		if err != nil {
+			return err
+		}
+
+		// Get the value
+		valItem, err := txn.Get(valueKey)
+		if err != nil && !errors.Is(err, badger.ErrKeyNotFound) {
+			return err
+		}
+
+		if valItem != nil {
+			size += int64(len(valueKey))
+			valCopy, err := valItem.ValueCopy(nil)
+			if err != nil {
+				return err
+			}
+			size += int64(len(valCopy))
+		}
+
+		// For compound types (List, Hash, Set, ZSet), count additional entries
+		switch keyType {
+		case KeyTypeList:
+			// Count all list entries
+			prefix := []byte(fmt.Sprintf("%s:%s:", KeyTypeList, key))
+			iter := txn.NewIterator(badger.DefaultIteratorOptions)
+			defer iter.Close()
+			for iter.Seek(prefix); iter.ValidForPrefix(prefix); iter.Next() {
+				item := iter.Item()
+				size += int64(len(item.KeyCopy(nil)))
+				valCopy, _ := item.ValueCopy(nil)
+				size += int64(len(valCopy))
+			}
+		case KeyTypeHash:
+			// Count all hash fields
+			prefix := []byte(fmt.Sprintf("%s:%s:", KeyTypeHash, key))
+			iter := txn.NewIterator(badger.DefaultIteratorOptions)
+			defer iter.Close()
+			for iter.Seek(prefix); iter.ValidForPrefix(prefix); iter.Next() {
+				item := iter.Item()
+				size += int64(len(item.KeyCopy(nil)))
+				valCopy, _ := item.ValueCopy(nil)
+				size += int64(len(valCopy))
+			}
+		case KeyTypeSet:
+			// Count all set members
+			prefix := []byte(fmt.Sprintf("%s:%s:", KeyTypeSet, key))
+			iter := txn.NewIterator(badger.DefaultIteratorOptions)
+			defer iter.Close()
+			for iter.Seek(prefix); iter.ValidForPrefix(prefix); iter.Next() {
+				item := iter.Item()
+				size += int64(len(item.KeyCopy(nil)))
+				valCopy, _ := item.ValueCopy(nil)
+				size += int64(len(valCopy))
+			}
+		case KeyTypeSortedSet:
+			// Count all zset entries (index and data)
+			prefix := []byte(fmt.Sprintf("%s%s:", prefixKeySortedSetBytes, key))
+			iter := txn.NewIterator(badger.DefaultIteratorOptions)
+			defer iter.Close()
+			for iter.Seek(prefix); iter.ValidForPrefix(prefix); iter.Next() {
+				item := iter.Item()
+				size += int64(len(item.KeyCopy(nil)))
+				valCopy, _ := item.ValueCopy(nil)
+				size += int64(len(valCopy))
+			}
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return 0, err
+	}
+
+	return size, nil
 }

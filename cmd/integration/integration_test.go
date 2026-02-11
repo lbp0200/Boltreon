@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"net"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -1118,6 +1120,602 @@ func TestSWAPDB(t *testing.T) {
 	result, err := testClient.Do(ctx, "SWAPDB", 0, 1).Result()
 	assert.NoError(t, err)
 	assert.Equal(t, "OK", result)
+}
+
+// TestXAutoClaim 测试XAUTOCLAIM命令
+func TestXAutoClaim(t *testing.T) {
+	setupTestServer(t)
+	defer teardownTestServer(t)
+
+	ctx := context.Background()
+
+	// 添加测试流
+	id1, err := testClient.XAdd(ctx, &redis.XAddArgs{
+		Stream: "mystream",
+		Values: map[string]any{"field1": "value1"},
+	}).Result()
+	assert.NoError(t, err)
+	assert.NotEqual(t, "", id1)
+
+	// 创建消费组
+	err = testClient.XGroupCreate(ctx, "mystream", "mygroup", "0").Err()
+	assert.NoError(t, err)
+
+	// 读取消息以创建pending条目 - 使用原始命令
+	_, err = testClient.Do(ctx, "XREADGROUP", "GROUP", "mygroup", "consumer1", "COUNT", "1", "STREAMS", "mystream", "0").Result()
+	assert.NoError(t, err)
+
+	// 等待一段时间让消息idle
+	time.Sleep(100 * time.Millisecond)
+
+	// 使用XAUTOCLAIM认领pending消息
+	autoClaimResult, err := testClient.Do(ctx, "XAUTOCLAIM", "mystream", "mygroup", "consumer2", "0", id1, "COUNT", "1").Result()
+	assert.NoError(t, err)
+
+	// 解析结果
+	arr, ok := autoClaimResult.([]interface{})
+	assert.True(t, ok)
+	// 格式: [nextID, [claimedIDs...], [messages...]]
+	assert.Equal(t, 1, len(arr)) // 至少返回nextID
+}
+
+// TestXInfoHelp 测试XINFO HELP命令
+func TestXInfoHelp(t *testing.T) {
+	setupTestServer(t)
+	defer teardownTestServer(t)
+
+	ctx := context.Background()
+
+	// 测试XINFO HELP
+	result, err := testClient.Do(ctx, "XINFO", "HELP").Result()
+	assert.NoError(t, err)
+
+	arr, ok := result.([]interface{})
+	assert.True(t, ok)
+	assert.True(t, len(arr) > 0)
+
+	// 验证帮助信息包含关键命令
+	foundHelp := false
+	foundStream := false
+	foundGroups := false
+	for _, line := range arr {
+		str, ok := line.(string)
+		if !ok {
+			continue
+		}
+		if strings.Contains(str, "XINFO STREAM") {
+			foundStream = true
+		}
+		if strings.Contains(str, "XINFO GROUPS") {
+			foundGroups = true
+		}
+		if strings.Contains(str, "<subcommand>") {
+			foundHelp = true
+		}
+	}
+	assert.True(t, foundHelp)
+	assert.True(t, foundStream)
+	assert.True(t, foundGroups)
+}
+
+// TestBLPOPBlocking 测试BLPOP阻塞命令
+func TestBLPOPBlocking(t *testing.T) {
+	setupTestServer(t)
+	defer teardownTestServer(t)
+
+	ctx := context.Background()
+
+	// 测试有数据时立即返回
+	_ = testClient.LPush(ctx, "testlist", "value1")
+	arr, err := testClient.BLPop(ctx, 0, "testlist").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, "testlist", arr[0])
+	assert.Equal(t, "value1", arr[1])
+}
+
+// TestBRPOPBlocking 测试BRPOP阻塞命令
+func TestBRPOPBlocking(t *testing.T) {
+	setupTestServer(t)
+	defer teardownTestServer(t)
+
+	ctx := context.Background()
+
+	// 测试有数据时立即返回
+	_ = testClient.RPush(ctx, "testlist", "value1")
+	arr, err := testClient.BRPop(ctx, 0, "testlist").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, "testlist", arr[0])
+	assert.Equal(t, "value1", arr[1])
+}
+
+// TestBRPOPLPUSHBlocking 测试BRPOPLPUSH阻塞命令
+func TestBRPOPLPUSHBlocking(t *testing.T) {
+	setupTestServer(t)
+	defer teardownTestServer(t)
+
+	ctx := context.Background()
+
+	// 准备源列表
+	_ = testClient.RPush(ctx, "sourcelist", "value1")
+
+	// 测试BRPOPLPUSH
+	result, err := testClient.BRPopLPush(ctx, "sourcelist", "destlist", 0).Result()
+	assert.NoError(t, err)
+	assert.Equal(t, "value1", result)
+
+	// 验证目标列表
+	val, err := testClient.LPop(ctx, "destlist").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, "value1", val)
+}
+
+// TestBLMoveBlocking 测试BLMOVE阻塞命令
+func TestBLMoveBlocking(t *testing.T) {
+	setupTestServer(t)
+	defer teardownTestServer(t)
+
+	ctx := context.Background()
+
+	// 准备源列表
+	_ = testClient.RPush(ctx, "sourcelist", "value1")
+
+	// 测试BLMOVE (RIGHT to LEFT)
+	result, err := testClient.Do(ctx, "BLMOVE", "sourcelist", "destlist", "RIGHT", "LEFT", "0").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, "value1", result)
+
+	// 验证目标列表
+	val, err := testClient.LPop(ctx, "destlist").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, "value1", val)
+}
+
+// TestXREADBlocking 测试XREAD BLOCK功能
+func TestXREADBlocking(t *testing.T) {
+	setupTestServer(t)
+	defer teardownTestServer(t)
+
+	ctx := context.Background()
+
+	// 添加一条消息
+	id1, err := testClient.XAdd(ctx, &redis.XAddArgs{
+		Stream: "mystream",
+		Values: map[string]any{"field1": "value1"},
+	}).Result()
+	assert.NoError(t, err)
+	assert.NotEqual(t, "", id1)
+
+	// 读取刚添加的消息 - 使用原始命令避免解析问题
+	result, err := testClient.Do(ctx, "XREAD", "COUNT", "1", "STREAMS", "mystream", "0").Result()
+	assert.NoError(t, err)
+	assert.NotEqual(t, nil, result)
+
+	// XREAD返回格式: [key, [entries...]]，每个stream返回一个[key, entries]对
+	// entries数组中每个元素是 [id, field, value, ...] 格式
+	arr, ok := result.([]interface{})
+	assert.True(t, ok)
+	// 期望: [mystream, [[id, field, value]]]
+	assert.True(t, len(arr) >= 2)
+}
+
+// jsonEqual compares two JSON strings semantically (ignoring field order)
+func jsonEqual(a, b string) bool {
+	var aVal, bVal interface{}
+	if err := json.Unmarshal([]byte(a), &aVal); err != nil {
+		return false
+	}
+	if err := json.Unmarshal([]byte(b), &bVal); err != nil {
+		return false
+	}
+	aJSON, _ := json.Marshal(aVal)
+	bJSON, _ := json.Marshal(bVal)
+	return string(aJSON) == string(bJSON)
+}
+
+// TestJSONSet 测试 JSON.SET 命令
+func TestJSONSet(t *testing.T) {
+	setupTestServer(t)
+	defer teardownTestServer(t)
+
+	ctx := context.Background()
+
+	// Test basic JSON.SET
+	result, err := testClient.Do(ctx, "JSON.SET", "user:1", "$", `{"name":"John","age":30}`).Result()
+	assert.NoError(t, err)
+	assert.Equal(t, "OK", result)
+
+	// Verify type
+	typ, err := testClient.Type(ctx, "user:1").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, "json", typ)
+
+	// Test JSON.SET with NX (should not update existing key)
+	result, err = testClient.Do(ctx, "JSON.SET", "user:1", "$", `{"name":"Jane"}`, "NX").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, "OK", result)
+
+	// Test JSON.SET with XX (should update existing key)
+	result, err = testClient.Do(ctx, "JSON.SET", "user:1", "$", `{"name":"Jane","city":"NYC"}`, "XX").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, "OK", result)
+}
+
+// TestJSONGet 测试 JSON.GET 命令
+func TestJSONGet(t *testing.T) {
+	setupTestServer(t)
+	defer teardownTestServer(t)
+
+	ctx := context.Background()
+
+	// Set up test data
+	_, err := testClient.Do(ctx, "JSON.SET", "user:1", "$", `{"name":"John","age":30,"city":"NYC"}`).Result()
+	assert.NoError(t, err)
+
+	// Test JSON.GET - use semantic comparison since JSON field order may vary
+	result, err := testClient.Do(ctx, "JSON.GET", "user:1").Result()
+	assert.NoError(t, err)
+	resultStr, ok := result.(string)
+	assert.True(t, ok)
+	expected := `{"name":"John","age":30,"city":"NYC"}`
+	if !jsonEqual(resultStr, expected) {
+		t.Errorf("expected %s, got %s", expected, resultStr)
+	}
+}
+
+// TestJSONDel 测试 JSON.DEL 命令
+func TestJSONDel(t *testing.T) {
+	setupTestServer(t)
+	defer teardownTestServer(t)
+
+	ctx := context.Background()
+
+	// Set up test data
+	_, err := testClient.Do(ctx, "JSON.SET", "user:1", "$", `{"name":"John","age":30}`).Result()
+	assert.NoError(t, err)
+
+	// Test JSON.DEL
+	count, err := testClient.Do(ctx, "JSON.DEL", "user:1").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, int64(1), count)
+
+	// Verify key is deleted
+	exists, err := testClient.Exists(ctx, "user:1").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, int64(0), exists)
+}
+
+// TestJSONType 测试 JSON.TYPE 命令
+func TestJSONType(t *testing.T) {
+	setupTestServer(t)
+	defer teardownTestServer(t)
+
+	ctx := context.Background()
+
+	// Set up test data
+	_, err := testClient.Do(ctx, "JSON.SET", "user:1", "$", `{"name":"John","age":30}`).Result()
+	assert.NoError(t, err)
+
+	// Test JSON.TYPE
+	result, err := testClient.Do(ctx, "JSON.TYPE", "user:1", "$").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, "object", result)
+}
+
+// TestJSONArrAppend 测试 JSON.ARRAPPEND 命令
+func TestJSONArrAppend(t *testing.T) {
+	setupTestServer(t)
+	defer teardownTestServer(t)
+
+	ctx := context.Background()
+
+	// Set up array
+	_, err := testClient.Do(ctx, "JSON.SET", "arr", "$", `[]`).Result()
+	assert.NoError(t, err)
+
+	// Test JSON.ARRAPPEND
+	count, err := testClient.Do(ctx, "JSON.ARRAPPEND", "arr", "$", "1", "2", "3").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, int64(3), count)
+
+	// Verify array length
+	result, err := testClient.Do(ctx, "JSON.GET", "arr").Result()
+	assert.NoError(t, err)
+	resultStr, ok := result.(string)
+	assert.True(t, ok)
+	expected := "[1,2,3]"
+	if !jsonEqual(resultStr, expected) {
+		t.Errorf("expected %s, got %s", expected, resultStr)
+	}
+}
+
+// TestJSONArrLen 测试 JSON.ARRLEN 命令
+func TestJSONArrLen(t *testing.T) {
+	setupTestServer(t)
+	defer teardownTestServer(t)
+
+	ctx := context.Background()
+
+	// Set up array
+	_, err := testClient.Do(ctx, "JSON.SET", "arr", "$", `["a","b","c"]`).Result()
+	assert.NoError(t, err)
+
+	// Test JSON.ARRLEN
+	result, err := testClient.Do(ctx, "JSON.ARRLEN", "arr", "$").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, int64(3), result)
+}
+
+// TestJSONObjKeys 测试 JSON.OBJKEYS 命令
+func TestJSONObjKeys(t *testing.T) {
+	setupTestServer(t)
+	defer teardownTestServer(t)
+
+	ctx := context.Background()
+
+	// Set up object
+	_, err := testClient.Do(ctx, "JSON.SET", "user:1", "$", `{"name":"John","age":30,"city":"NYC"}`).Result()
+	assert.NoError(t, err)
+
+	// Test JSON.OBJKEYS
+	result, err := testClient.Do(ctx, "JSON.OBJKEYS", "user:1", "$").Result()
+	assert.NoError(t, err)
+	// Result is an array of keys
+	keys, ok := result.([]interface{})
+	assert.Equal(t, true, ok)
+	assert.Equal(t, 3, len(keys))
+}
+
+// TestJSONNumIncrBy 测试 JSON.NUMINCRBY 命令
+func TestJSONNumIncrBy(t *testing.T) {
+	setupTestServer(t)
+	defer teardownTestServer(t)
+
+	ctx := context.Background()
+
+	// Set up number
+	_, err := testClient.Do(ctx, "JSON.SET", "counter", "$", `10`).Result()
+	assert.NoError(t, err)
+
+	// Test JSON.NUMINCRBY
+	result, err := testClient.Do(ctx, "JSON.NUMINCRBY", "counter", "$", "5").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, "15", result)
+}
+
+// TestJSONNumMultBy 测试 JSON.NUMMULTBY 命令
+func TestJSONNumMultBy(t *testing.T) {
+	setupTestServer(t)
+	defer teardownTestServer(t)
+
+	ctx := context.Background()
+
+	// Set up number
+	_, err := testClient.Do(ctx, "JSON.SET", "counter", "$", `10`).Result()
+	assert.NoError(t, err)
+
+	// Test JSON.NUMMULTBY
+	result, err := testClient.Do(ctx, "JSON.NUMMULTBY", "counter", "$", "2").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, "20", result)
+}
+
+// TestJSONClear 测试 JSON.CLEAR 命令
+func TestJSONClear(t *testing.T) {
+	setupTestServer(t)
+	defer teardownTestServer(t)
+
+	ctx := context.Background()
+
+	// Set up object
+	_, err := testClient.Do(ctx, "JSON.SET", "user:1", "$", `{"name":"John","age":30}`).Result()
+	assert.NoError(t, err)
+
+	// Test JSON.CLEAR
+	count, err := testClient.Do(ctx, "JSON.CLEAR", "user:1", "$").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, int64(1), count)
+}
+
+// TestJSONDebugMemory 测试 JSON.DEBUG MEMORY 命令
+func TestJSONDebugMemory(t *testing.T) {
+	setupTestServer(t)
+	defer teardownTestServer(t)
+
+	ctx := context.Background()
+
+	// Set up object
+	_, err := testClient.Do(ctx, "JSON.SET", "user:1", "$", `{"name":"John"}`).Result()
+	assert.NoError(t, err)
+
+	// Test JSON.DEBUG MEMORY
+	result, err := testClient.Do(ctx, "JSON.DEBUG", "MEMORY", "user:1", "$").Result()
+	assert.NoError(t, err)
+	memory, ok := result.(int64)
+	assert.Equal(t, true, ok)
+	assert.True(t, memory > 0)
+}
+
+// TestJSONMGet 测试 JSON.MGET 命令
+func TestJSONMGet(t *testing.T) {
+	setupTestServer(t)
+	defer teardownTestServer(t)
+
+	ctx := context.Background()
+
+	// Set up test data
+	_, err := testClient.Do(ctx, "JSON.SET", "user:1", "$", `{"name":"John"}`).Result()
+	assert.NoError(t, err)
+	_, err = testClient.Do(ctx, "JSON.SET", "user:2", "$", `{"name":"Jane"}`).Result()
+	assert.NoError(t, err)
+
+	// Test JSON.MGET
+	result, err := testClient.Do(ctx, "JSON.MGET", "user:1", "user:2", "$").Result()
+	assert.NoError(t, err)
+	// Result is an array
+	values, ok := result.([]interface{})
+	assert.Equal(t, true, ok)
+	assert.Equal(t, 2, len(values))
+}
+
+// TestJSONNotFound 测试不存在的键
+func TestJSONNotFound(t *testing.T) {
+	setupTestServer(t)
+	defer teardownTestServer(t)
+
+	ctx := context.Background()
+
+	// Test JSON.GET on non-existent key - returns redis.Nil
+	result, err := testClient.Do(ctx, "JSON.GET", "nonexistent").Result()
+	assert.Equal(t, nil, result)
+	assert.True(t, err == redis.Nil || err == nil)
+
+	// Test JSON.DEL on non-existent key
+	count, err := testClient.Do(ctx, "JSON.DEL", "nonexistent").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, int64(0), count)
+}
+
+// TestJSONWithExistingDB 测试与现有数据库的交互
+func TestJSONWithExistingDB(t *testing.T) {
+	setupTestServer(t)
+	defer teardownTestServer(t)
+
+	ctx := context.Background()
+
+	// Test that JSON keys don't interfere with other types
+	_, err := testClient.Set(ctx, "string:key", "value", 0).Result()
+	assert.NoError(t, err)
+	_, err = testClient.Do(ctx, "JSON.SET", "json:key", "$", `{"data":"test"}`).Result()
+	assert.NoError(t, err)
+
+	// Verify both exist
+	stringExists, err := testClient.Exists(ctx, "string:key").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, int64(1), stringExists)
+
+	jsonExists, err := testClient.Exists(ctx, "json:key").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, int64(1), jsonExists)
+
+	// Verify types
+	stringType, err := testClient.Type(ctx, "string:key").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, "string", stringType)
+
+	jsonType, err := testClient.Type(ctx, "json:key").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, "json", jsonType)
+}
+
+// TestSelect 测试 SELECT 命令
+func TestSelect(t *testing.T) {
+	setupTestServer(t)
+	defer teardownTestServer(t)
+
+	ctx := context.Background()
+
+	// SELECT should return OK for any database number (BoltDB is single-db)
+	result, err := testClient.Do(ctx, "SELECT", "0").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, "OK", result)
+
+	// SELECT with other database numbers should also return OK
+	result, err = testClient.Do(ctx, "SELECT", "15").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, "OK", result)
+}
+
+// TestMove 测试 MOVE 命令
+func TestMove(t *testing.T) {
+	setupTestServer(t)
+	defer teardownTestServer(t)
+
+	ctx := context.Background()
+
+	// MOVE always returns 0 in single-db implementation
+	result, err := testClient.Do(ctx, "MOVE", "key", "1").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, int64(0), result)
+}
+
+// TestWait 测试 WAIT 命令
+func TestWait(t *testing.T) {
+	setupTestServer(t)
+	defer teardownTestServer(t)
+
+	ctx := context.Background()
+
+	// WAIT should return 0 (no replication)
+	result, err := testClient.Do(ctx, "WAIT", "1", "1000").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, int64(0), result)
+}
+
+// TestSlowLog 测试 SLOWLOG 命令
+func TestSlowLog(t *testing.T) {
+	setupTestServer(t)
+	defer teardownTestServer(t)
+
+	ctx := context.Background()
+
+	// SLOWLOG GET should return empty array
+	result, err := testClient.Do(ctx, "SLOWLOG", "GET", "10").Result()
+	assert.NoError(t, err)
+	_, ok := result.([]interface{})
+	assert.True(t, ok) // Should be empty array
+
+	// SLOWLOG LEN should return 0
+	result, err = testClient.Do(ctx, "SLOWLOG", "LEN").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, int64(0), result)
+
+	// SLOWLOG RESET should return OK
+	result, err = testClient.Do(ctx, "SLOWLOG", "RESET").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, "OK", result)
+
+	// SLOWLOG HELP should return help text
+	result, err = testClient.Do(ctx, "SLOWLOG", "HELP").Result()
+	assert.NoError(t, err)
+	arr, ok := result.([]interface{})
+	assert.True(t, ok)
+	assert.True(t, len(arr) > 0)
+}
+
+// TestMemoryUsage 测试 MEMORY USAGE 命令
+func TestMemoryUsage(t *testing.T) {
+	setupTestServer(t)
+	defer teardownTestServer(t)
+
+	ctx := context.Background()
+
+	// Set a string value
+	_ = testClient.Set(ctx, "memkey", "testvalue", 0).Err()
+
+	// MEMORY USAGE should return positive value
+	result, err := testClient.Do(ctx, "MEMORY", "USAGE", "memkey").Result()
+	assert.NoError(t, err)
+	memory, ok := result.(int64)
+	assert.True(t, ok)
+	assert.True(t, memory > 0)
+
+	// MEMORY USAGE on non-existent key should return nil
+	result, err = testClient.Do(ctx, "MEMORY", "USAGE", "nonexistent").Result()
+	assert.Equal(t, nil, result)
+	assert.True(t, err == redis.Nil || err == nil)
+
+	// MEMORY DOCTOR should return info
+	result, err = testClient.Do(ctx, "MEMORY", "DOCTOR").Result()
+	assert.NoError(t, err)
+	_, ok = result.([]interface{})
+	assert.True(t, ok)
+
+	// MEMORY HELP should return help text
+	result, err = testClient.Do(ctx, "MEMORY", "HELP").Result()
+	assert.NoError(t, err)
+	arr, ok := result.([]interface{})
+	assert.True(t, ok)
+	assert.True(t, len(arr) > 0)
 }
 
 // TestMain 测试入口

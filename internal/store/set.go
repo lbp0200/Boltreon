@@ -786,3 +786,69 @@ func (s *BotreonStore) SInterCard(keys ...string) (int64, error) {
 	})
 	return count, err
 }
+
+// SScanResult 定义 SSCAN 命令的返回结果
+type SScanResult struct {
+	Cursor   uint64
+	Members  []string
+}
+
+// SScan 实现 Redis SSCAN 命令，增量迭代集合的成员
+func (s *BotreonStore) SScan(key string, cursor uint64, pattern string, count int) (SScanResult, error) {
+	var result SScanResult
+	result.Cursor = 0
+	result.Members = []string{}
+
+	if count <= 0 {
+		count = 10 // 默认值
+	}
+
+	err := s.db.View(func(txn *badger.Txn) error {
+		opts := badger.DefaultIteratorOptions
+		prefix := []byte(KeyTypeSet + ":" + key + ":member:")
+		opts.Prefix = prefix
+		opts.PrefetchValues = false
+
+		iter := txn.NewIterator(opts)
+		defer iter.Close()
+
+		currentPos := uint64(0)
+		collected := 0
+
+		// 如果cursor不为0，需要跳过前面的成员
+		if cursor > 0 {
+			for iter.Seek(prefix); iter.ValidForPrefix(prefix) && currentPos < cursor; iter.Next() {
+				currentPos++
+			}
+		} else {
+			iter.Seek(prefix)
+		}
+
+		// 收集匹配的成员
+		for iter.ValidForPrefix(prefix) && collected < count {
+			item := iter.Item()
+			keyBytes := item.KeyCopy(nil)
+
+			// 解析键格式: set:key:member:memberValue
+			member := string(keyBytes[len(prefix):])
+
+			if pattern == "" || pattern == "*" || matchPattern(member, pattern) {
+				result.Members = append(result.Members, member)
+				collected++
+			}
+
+			currentPos++
+			iter.Next()
+		}
+
+		// 检查是否还有更多成员
+		if iter.ValidForPrefix(prefix) {
+			result.Cursor = currentPos
+		} else {
+			result.Cursor = 0 // 0表示迭代完成
+		}
+
+		return nil
+	})
+	return result, err
+}

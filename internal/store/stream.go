@@ -304,7 +304,7 @@ func (s *BotreonStore) XAdd(key string, opts StreamXAddOptions, id string, field
 				currentSeq := meta.FirstSeq
 				for it.Seek(prefix); it.ValidForPrefix(prefix) && count < entriesToRemove; it.Next() {
 					item := it.Item()
-					txn.Delete(item.Key())
+					_ = txn.Delete(item.Key())
 					count++
 					// Move to next ID
 					currentSeq++
@@ -341,6 +341,16 @@ func (s *BotreonStore) XAdd(key string, opts StreamXAddOptions, id string, field
 		resultID = id
 		return nil
 	})
+
+	// Notify waiting stream readers
+	if err == nil && resultID != "" {
+		s.notifyStreamRead(key, []StreamEntry{
+			{
+				ID:     resultID,
+				Fields: fields,
+			},
+		})
+	}
 
 	return resultID, err
 }
@@ -453,12 +463,204 @@ func (s *BotreonStore) XRead(count int64, block int64, args ...string) ([]map[st
 	})
 
 	if block > 0 && len(result) == 0 {
-		// TODO: Implement blocking behavior
-		// For now, just return empty
-		return nil, nil
+		// Implement blocking behavior
+		return s.xReadBlocking(count, block, args)
 	}
 
 	return result, err
+}
+
+// xReadBlocking implements blocking XREAD
+func (s *BotreonStore) xReadBlocking(count int64, block int64, args []string) ([]map[string][]StreamEntry, error) {
+	// Create a channel for this read request
+	resultCh := make(chan StreamReadResult, 1)
+
+	// Set up timeout FIRST - this is critical
+	var timeoutCh <-chan time.Time
+	if block > 0 {
+		timeoutCh = time.After(time.Duration(block) * time.Millisecond)
+	}
+
+	// Register this channel for each key BEFORE trying immediate read
+	s.streamBlockingMu.Lock()
+	for i := 0; i < len(args); i += 2 {
+		key := args[i]
+		s.streamBlockingChans[key] = append(s.streamBlockingChans[key], resultCh)
+	}
+	s.streamBlockingMu.Unlock()
+
+	// Try immediate read AFTER registering the channel
+	result, err := s.xReadImmediate(count, args...)
+	if err != nil {
+		// Clean up channels before returning error
+		s.streamBlockingMu.Lock()
+		for i := 0; i < len(args); i += 2 {
+			key := args[i]
+			chans := s.streamBlockingChans[key]
+			for j, ch := range chans {
+				if ch == resultCh {
+					s.streamBlockingChans[key] = append(chans[:j], chans[j+1:]...)
+					break
+				}
+			}
+		}
+		s.streamBlockingMu.Unlock()
+		return nil, err
+	}
+	if len(result) > 0 {
+		// Clean up channels before returning
+		s.streamBlockingMu.Lock()
+		for i := 0; i < len(args); i += 2 {
+			key := args[i]
+			chans := s.streamBlockingChans[key]
+			for j, ch := range chans {
+				if ch == resultCh {
+					s.streamBlockingChans[key] = append(chans[:j], chans[j+1:]...)
+					break
+				}
+			}
+		}
+		s.streamBlockingMu.Unlock()
+		return result, nil
+	}
+
+	// If block is 0 (infinite wait), we wait forever until data arrives
+	if block == 0 {
+		for {
+			select {
+			case streamResult := <-resultCh:
+				if len(streamResult.Entries) > 0 {
+					return []map[string][]StreamEntry{{streamResult.Key: streamResult.Entries}}, nil
+				}
+			}
+			// Check if channel is still valid, if not, retry immediate read
+			select {
+			case <-resultCh:
+				// Already handled above
+			default:
+			}
+		}
+	}
+
+	// Wait for data or timeout
+	select {
+	case streamResult := <-resultCh:
+		if len(streamResult.Entries) > 0 {
+			return []map[string][]StreamEntry{{streamResult.Key: streamResult.Entries}}, nil
+		}
+	case <-timeoutCh:
+	}
+
+	// Clean up - remove the channel
+	s.streamBlockingMu.Lock()
+	for i := 0; i < len(args); i += 2 {
+		key := args[i]
+		chans := s.streamBlockingChans[key]
+		for j, ch := range chans {
+			if ch == resultCh {
+				s.streamBlockingChans[key] = append(chans[:j], chans[j+1:]...)
+				break
+			}
+		}
+	}
+	s.streamBlockingMu.Unlock()
+
+	return nil, nil
+}
+
+// xReadImmediate performs an immediate (non-blocking) XREAD
+func (s *BotreonStore) xReadImmediate(count int64, args ...string) ([]map[string][]StreamEntry, error) {
+	result := make([]map[string][]StreamEntry, 0)
+
+	err := s.db.View(func(txn *badger.Txn) error {
+		for i := 0; i < len(args); i += 2 {
+			key := args[i]
+			startID := args[i+1]
+
+			// Get stream metadata
+			metaKey := streamKey(key)
+			var meta *streamMetaData
+			item, err := txn.Get(metaKey)
+			if errors.Is(err, badger.ErrKeyNotFound) {
+				continue // Skip non-existent streams
+			}
+			if err != nil {
+				return err
+			}
+			if err := item.Value(func(val []byte) error {
+				meta, err = decodeStreamMeta(val)
+				return err
+			}); err != nil {
+				return err
+			}
+
+			// Get entries after start ID
+			entries := make([]StreamEntry, 0)
+			prefix := streamDataPrefix(key)
+			it := txn.NewIterator(badger.DefaultIteratorOptions)
+			defer it.Close()
+
+			startTS, startSeq, _ := parseStreamID(startID)
+			if startID == "$" {
+				// Only get new entries after last ID
+				startTS = meta.LastID
+				startSeq = meta.LastSeq + 1
+			}
+
+			for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
+				item := it.Item()
+				id := string(bytes.TrimPrefix(item.Key(), prefix))
+
+				ts, seq, _ := parseStreamID(id)
+				if compareStreamID(id, startID) <= 0 && startID != "$" {
+					continue
+				}
+				if startID == "$" && (ts < startTS || (ts == startTS && seq <= startSeq)) {
+					continue
+				}
+
+				var fields map[string]string
+				if err := item.Value(func(val []byte) error {
+					return json.Unmarshal(val, &fields)
+				}); err != nil {
+					return err
+				}
+
+				entries = append(entries, StreamEntry{
+					ID:        id,
+					Fields:    fields,
+					Timestamp: ts,
+					Sequence:  seq,
+				})
+
+				if count > 0 && int64(len(entries)) >= count {
+					break
+				}
+			}
+
+			if len(entries) > 0 {
+				result = append(result, map[string][]StreamEntry{key: entries})
+			}
+		}
+		return nil
+	})
+
+	return result, err
+}
+
+// notifyStreamRead notifies waiting stream readers about new data
+func (s *BotreonStore) notifyStreamRead(key string, entries []StreamEntry) {
+	s.streamBlockingMu.Lock()
+	defer s.streamBlockingMu.Unlock()
+
+	chans := s.streamBlockingChans[key]
+	for _, ch := range chans {
+		select {
+		case ch <- StreamReadResult{Key: key, Entries: entries}:
+		default:
+			// Channel not ready
+		}
+	}
 }
 
 // XRange returns entries in a range
@@ -1170,7 +1372,111 @@ func (s *BotreonStore) GetStreamEntry(key, id string) (*StreamEntry, error) {
 	return entry, err
 }
 
-// GetAllStreamEntries retrieves all entries from a stream
-func (s *BotreonStore) GetAllStreamEntries(key string) ([]StreamEntry, error) {
-	return s.XRange(key, "-", "+", 0)
+// XAutoClaimOptions contains options for XAUTOCLAIM
+type XAutoClaimOptions struct {
+	Count   int64
+	JustID  bool
+}
+
+// XAutoClaimResult contains the result of XAUTOCLAIM
+type XAutoClaimResult struct {
+	NextID    string
+	ClaimedIDs []string
+	Messages  []StreamEntry
+}
+
+// XAutoClaim automatically claims pending messages
+// XAUTOCLAIM key group consumer min-idle-time start [COUNT count] [JUSTID]
+func (s *BotreonStore) XAutoClaim(key, group, consumer string, minIdleTime int64, start string, opts XAutoClaimOptions) (*XAutoClaimResult, error) {
+	var result XAutoClaimResult
+
+	err := s.db.Update(func(txn *badger.Txn) error {
+		groupKey := streamGroupDataKey(key, group)
+		item, err := txn.Get(groupKey)
+		if errors.Is(err, badger.ErrKeyNotFound) {
+			return fmt.Errorf("ERR no such key")
+		}
+		if err != nil {
+			return err
+		}
+
+		var groupData *StreamGroup
+		if err := item.Value(func(val []byte) error {
+			return json.Unmarshal(val, &groupData)
+		}); err != nil {
+			return err
+		}
+
+		now := time.Now().UnixNano() / int64(time.Millisecond)
+
+		// Parse start ID
+		startTS, startSeq, _ := parseStreamID(start)
+
+		// Find pending entries that meet the idle time requirement
+		for id, pending := range groupData.Pending {
+			idTS, idSeq, _ := parseStreamID(id)
+
+			// Skip if ID is before start
+			if idTS < startTS || (idTS == startTS && idSeq <= startSeq) {
+				continue
+			}
+
+			// Check idle time
+			idleTime := now - pending.LastDelivery
+			if idleTime < minIdleTime {
+				continue
+			}
+
+			// Claim the entry
+			pending.Consumer = consumer
+			pending.LastDelivery = now
+			pending.DeliveryCount++
+
+			result.ClaimedIDs = append(result.ClaimedIDs, id)
+
+			// Get the message content
+			dataKey := streamDataKey(key, id)
+			msgItem, err := txn.Get(dataKey)
+			if err == nil && !errors.Is(err, badger.ErrKeyNotFound) {
+				var fields map[string]string
+				if err := msgItem.Value(func(val []byte) error {
+					return json.Unmarshal(val, &fields)
+				}); err == nil {
+					result.Messages = append(result.Messages, StreamEntry{
+						ID:        id,
+						Fields:    fields,
+						Timestamp: idTS,
+						Sequence:  idSeq,
+					})
+				}
+			}
+
+			// Check count limit
+			if opts.Count > 0 && int64(len(result.ClaimedIDs)) >= opts.Count {
+				break
+			}
+		}
+
+		// Update the next start ID
+		if len(result.ClaimedIDs) > 0 {
+			lastID := result.ClaimedIDs[len(result.ClaimedIDs)-1]
+			lastTS, lastSeq, _ := parseStreamID(lastID)
+			if lastSeq > 0 {
+				result.NextID = formatStreamID(lastTS, lastSeq)
+			} else {
+				result.NextID = formatStreamID(lastTS, lastSeq)
+			}
+		} else {
+			result.NextID = start
+		}
+
+		// Save group data
+		data, err := json.Marshal(groupData)
+		if err != nil {
+			return err
+		}
+		return txn.Set(groupKey, data)
+	})
+
+	return &result, err
 }

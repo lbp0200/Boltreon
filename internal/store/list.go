@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/lbp0200/BoltDB/internal/helper"
 
@@ -172,6 +173,10 @@ func (s *BotreonStore) LPush(key string, values ...string) (int, error) {
 		return s.listUpdateMeta(txn, key, length, start, end)
 	})
 	// #nosec G115 - length is bounded by practical list size limits
+
+	// Notify blocking pop waiters
+	s.notifyBlockingPop(key, values[0])
+
 	return int(finalLength), err // 返回操作后列表的长度（Redis规范）
 }
 
@@ -360,6 +365,10 @@ func (s *BotreonStore) RPush(key string, values ...string) (int, error) {
 		return s.listUpdateMeta(txn, key, length, start, end)
 	})
 	// #nosec G115 - length is bounded by practical list size limits
+
+	// Notify blocking pop waiters
+	s.notifyBlockingPop(key, values[0])
+
 	return int(finalLength), err // 返回操作后列表的长度（Redis规范）
 }
 
@@ -1237,4 +1246,152 @@ func (s *BotreonStore) LMove(source, destination, sourceDirection, destinationDi
 // BLMove 实现 Redis BLMOVE 命令，阻塞式LMOVE（简化版本：非阻塞）
 func (s *BotreonStore) BLMove(source, destination, sourceDirection, destinationDirection string, timeout float64) (string, error) {
 	return s.LMove(source, destination, sourceDirection, destinationDirection)
+}
+
+// notifyBlockingPop notifies one waiting channel for a key
+func (s *BotreonStore) notifyBlockingPop(key, value string) {
+	s.blockingMu.Lock()
+	defer s.blockingMu.Unlock()
+
+	chans, exists := s.blockingPopChans[key]
+	if !exists || len(chans) == 0 {
+		return
+	}
+
+	// Notify the first waiting channel
+	select {
+	case chans[0] <- BlockingResult{Key: key, Value: value}:
+		// Remove the notified channel
+		s.blockingPopChans[key] = chans[1:]
+	default:
+		// Channel not ready, keep it
+	}
+}
+
+// registerBlockingPop registers a channel to wait for a key
+func (s *BotreonStore) registerBlockingPop(key string, ch chan BlockingResult) {
+	s.blockingMu.Lock()
+	defer s.blockingMu.Unlock()
+
+	s.blockingPopChans[key] = append(s.blockingPopChans[key], ch)
+}
+
+// BLPOPBlocking implements blocking left pop with timeout
+func (s *BotreonStore) BLPOPBlocking(keys []string, timeout int) (string, string, error) {
+	// Try non-blocking first
+	for _, key := range keys {
+		value, err := s.LPop(key)
+		if err == nil && value != "" {
+			return key, value, nil
+		}
+	}
+
+	// If timeout is 0, return immediately
+	if timeout == 0 {
+		return "", "", nil
+	}
+
+	// Create result channel
+	resultCh := make(chan BlockingResult, 1)
+	timeoutCh := time.After(time.Duration(timeout) * time.Second)
+
+	// Register this channel for each key
+	s.blockingMu.Lock()
+	for _, key := range keys {
+		s.blockingPopChans[key] = append(s.blockingPopChans[key], resultCh)
+	}
+	s.blockingMu.Unlock()
+
+	// Wait for data or timeout
+	select {
+	case result := <-resultCh:
+		return result.Key, result.Value, nil
+	case <-timeoutCh:
+		return "", "", nil
+	}
+}
+
+// BRPOPBlocking implements blocking right pop with timeout
+func (s *BotreonStore) BRPOPBlocking(keys []string, timeout int) (string, string, error) {
+	// Try non-blocking first
+	for _, key := range keys {
+		value, err := s.RPop(key)
+		if err == nil && value != "" {
+			return key, value, nil
+		}
+	}
+
+	// If timeout is 0, return immediately
+	if timeout == 0 {
+		return "", "", nil
+	}
+
+	// Create result channel
+	resultCh := make(chan BlockingResult, 1)
+	timeoutCh := time.After(time.Duration(timeout) * time.Second)
+
+	// Register this channel for each key
+	s.blockingMu.Lock()
+	for _, key := range keys {
+		s.blockingPopChans[key] = append(s.blockingPopChans[key], resultCh)
+	}
+	s.blockingMu.Unlock()
+
+	// Wait for data or timeout
+	select {
+	case result := <-resultCh:
+		return result.Key, result.Value, nil
+	case <-timeoutCh:
+		return "", "", nil
+	}
+}
+
+// BRPOPLPUSHBlocking implements blocking rpoplpush with timeout
+func (s *BotreonStore) BRPOPLPUSHBlocking(source, destination string, timeout int) (string, error) {
+	if timeout == 0 {
+		value, err := s.RPopLPush(source, destination)
+		if err != nil || value == "" {
+			return "", nil
+		}
+		return value, nil
+	}
+
+	timeoutCh := time.After(time.Duration(timeout) * time.Second)
+
+	for {
+		value, err := s.RPopLPush(source, destination)
+		if err == nil && value != "" {
+			return value, nil
+		}
+
+		select {
+		case <-timeoutCh:
+			return "", nil
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+}
+
+// BLMoveBlocking implements blocking lmove with timeout
+func (s *BotreonStore) BLMoveBlocking(source, destination, sourceDirection, destinationDirection string, timeout float64) (string, error) {
+	if timeout == 0 {
+		return s.LMove(source, destination, sourceDirection, destinationDirection)
+	}
+
+	timeoutCh := time.After(time.Duration(timeout) * time.Second)
+
+	for {
+		value, err := s.LMove(source, destination, sourceDirection, destinationDirection)
+		if err == nil && value != "" {
+			return value, nil
+		}
+
+		select {
+		case <-timeoutCh:
+			return "", nil
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
 }

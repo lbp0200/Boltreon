@@ -732,3 +732,261 @@ func (s *BotreonStore) BitPos(key string, bit int, start, end int) (int, error) 
 	})
 	return pos, err
 }
+
+// BitFieldResult represents the result of a BITFIELD operation
+type BitFieldResult struct {
+	Value int64 // The result value (nil if overflow)
+	Overshifted bool // Whether the result was overflowed/undershifted
+}
+
+// BitFieldResultWithOverflow wraps a result with overflow information
+type BitFieldResultWithOverflow struct {
+	Value int64
+	Overflow string // "overflow", "sat", "fail"
+}
+
+// parseBitFieldType parses a type string like "i8", "u16", "i32", "u64" etc.
+func parseBitFieldType(typeStr string) (isSigned bool, bits int, err error) {
+	if len(typeStr) < 2 {
+		return false, 0, fmt.Errorf("invalid type: %s", typeStr)
+	}
+	if typeStr[0] == 'i' {
+		isSigned = true
+	} else if typeStr[0] == 'u' {
+		isSigned = false
+	} else {
+		return false, 0, fmt.Errorf("invalid type: %s", typeStr)
+	}
+	bits, err = strconv.Atoi(typeStr[1:])
+	if err != nil {
+		return false, 0, fmt.Errorf("invalid bit count: %s", typeStr)
+	}
+	if bits <= 0 || bits > 64 {
+		return false, 0, fmt.Errorf("invalid bit count: %d", bits)
+	}
+	return isSigned, bits, nil
+}
+
+// BitField implements the BITFIELD command
+// BITFIELD key [GET type offset | SET type offset value | INCRBY type offset increment] ...
+func (s *BotreonStore) BitField(key string, operations []string) ([]interface{}, error) {
+	// Parse operations
+	type operation struct {
+		op string // "GET", "SET", "INCRBY"
+		isSigned bool
+		bits int
+		offset int64
+		value int64
+	}
+
+	ops := make([]operation, 0, len(operations))
+	for i := 0; i < len(operations); {
+		opType := operations[i]
+		i++
+
+		if i >= len(operations) {
+			return nil, fmt.Errorf("BITFIELD: missing arguments for %s", opType)
+		}
+
+		isSigned, bits, err := parseBitFieldType(opType)
+		if err != nil {
+			return nil, err
+		}
+
+		offsetStr := operations[i]
+		i++
+
+		offset, err := strconv.ParseInt(offsetStr, 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("BITFIELD: invalid offset: %s", offsetStr)
+		}
+
+		var value int64 = 0
+		if opType == "SET" || opType == "INCRBY" {
+			if i >= len(operations) {
+				return nil, fmt.Errorf("BITFIELD: missing value for SET/INCRBY")
+			}
+			valueStr := operations[i]
+			i++
+			value, err = strconv.ParseInt(valueStr, 10, 64)
+			if err != nil {
+				return nil, fmt.Errorf("BITFIELD: invalid value: %s", valueStr)
+			}
+		}
+
+		ops = append(ops, operation{
+			op: opType,
+			isSigned: isSigned,
+			bits: bits,
+			offset: offset,
+			value: value,
+		})
+	}
+
+	// Execute operations in a transaction
+	results := make([]interface{}, 0, len(ops))
+
+	err := s.db.Update(func(txn *badger.Txn) error {
+		// First, get the current value
+		data, err := s.getStringBytes(txn, key)
+		if err != nil {
+			if errors.Is(err, ErrKeyNotFound) {
+				// Key doesn't exist, treat as all zeros
+				data = []byte{}
+			} else {
+				return err
+			}
+		}
+		originalLen := len(data)
+
+		for _, op := range ops {
+			// Convert offset (can be negative, meaning from end)
+			bitOffset := op.offset
+			if bitOffset < 0 {
+				// Negative offset means from the end
+				// For simplicity, we don't support this for now
+				return fmt.Errorf("BITFIELD: negative offset not supported")
+			}
+
+			// Calculate byte and bit positions
+			byteIndex := int(bitOffset) / 8
+			_ = byteIndex
+			numBytes := (int(bitOffset) + int(op.bits) + 7) / 8
+
+			// Ensure data is long enough
+			if byteIndex >= len(data) {
+				newData := make([]byte, numBytes)
+				copy(newData, data)
+				data = newData
+			}
+
+			// Extract value from data
+			var extractedValue int64 = 0
+			for j := 0; j < op.bits; j++ {
+				currentBitOffset := bitOffset + int64(j)
+				currentByteIndex := int(currentBitOffset) / 8
+				currentBitIndex := uint(currentBitOffset) % 8
+				if currentByteIndex < len(data) && (data[currentByteIndex]&(1<<(7-currentBitIndex))) != 0 {
+					extractedValue |= int64(1) << uint(j)
+				}
+			}
+
+			// For signed types, convert from unsigned to signed
+			if op.isSigned {
+				// Check if the sign bit is set
+				signBit := int64(1) << uint(op.bits-1)
+				if (extractedValue & signBit) != 0 {
+					// Negative number: convert to negative
+					mask := int64(1)<<uint(op.bits) - 1
+					extractedValue = extractedValue | ^mask
+				}
+			}
+
+			var resultValue int64
+			switch op.op {
+			case "GET":
+				resultValue = extractedValue
+				results = append(results, resultValue)
+			case "SET":
+				// Write value to data
+				for j := 0; j < op.bits; j++ {
+					currentBitOffset := bitOffset + int64(j)
+					currentByteIndex := int(currentBitOffset) / 8
+					currentBitIndex := uint(currentBitOffset) % 8
+					bitValue := (op.value >> uint(j)) & 1
+					if bitValue == 1 {
+						data[currentByteIndex] |= (1 << (7 - currentBitIndex))
+					} else {
+						data[currentByteIndex] &^= (1 << (7 - currentBitIndex))
+					}
+				}
+				resultValue = extractedValue
+				results = append(results, resultValue)
+			case "INCRBY":
+				// Calculate new value with overflow handling
+				newValue := extractedValue + op.value
+
+				// Check overflow
+				var overflow string
+				if op.isSigned {
+					maxVal := int64(1)<<uint(op.bits-1) - 1
+					minVal := -int64(1)<<uint(op.bits-1) + 1 // Changed from -1<<63 to avoid overflow
+					// Adjust minVal to be within range
+					if op.bits == 64 {
+						minVal = -int64(1) << 63
+					}
+					if newValue > maxVal {
+						newValue = maxVal
+						overflow = "sat"
+					} else if newValue < minVal {
+						newValue = minVal
+						overflow = "sat"
+					}
+				} else {
+					maxVal := int64(1)<<uint(op.bits) - 1
+					if newValue > maxVal {
+						newValue = 0
+						overflow = "sat"
+					} else if newValue < 0 {
+						newValue = maxVal
+						overflow = "sat"
+					}
+				}
+
+				// Write new value to data
+				for j := 0; j < op.bits; j++ {
+					currentBitOffset := bitOffset + int64(j)
+					currentByteIndex := int(currentBitOffset) / 8
+					currentBitIndex := uint(currentBitOffset) % 8
+					bitValue := (newValue >> uint(j)) & 1
+					if bitValue == 1 {
+						data[currentByteIndex] |= (1 << (7 - currentBitIndex))
+					} else {
+						data[currentByteIndex] &^= (1 << (7 - currentBitIndex))
+					}
+				}
+				resultValue = newValue
+				if overflow != "" {
+					results = append(results, []interface{}{resultValue, overflow})
+				} else {
+					results = append(results, resultValue)
+				}
+			}
+
+			// Update TTL if needed
+			if len(data) > originalLen {
+				// Get the current TTL if any
+				typeKey := TypeOfKeyGet(key)
+				if item, err := txn.Get(typeKey); err == nil {
+					val, _ := item.ValueCopy(nil)
+					if string(val) == KeyTypeString {
+						strKey := s.stringKey(key)
+						if strItem, err := txn.Get([]byte(strKey)); err == nil {
+							if expiresAt := strItem.ExpiresAt(); expiresAt > 0 {
+								ttl := time.Duration(int64(expiresAt) - time.Now().UnixNano())
+								if ttl > 0 {
+									_ = txn.Delete([]byte(strKey))
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+
+		// Save the updated data
+		if len(data) > 0 {
+			strKey := s.stringKey(key)
+			if err := txn.Set(TypeOfKeyGet(key), []byte(KeyTypeString)); err != nil {
+				return err
+			}
+			if err := txn.Set([]byte(strKey), data); err != nil {
+				return err
+			}
+		}
+
+		return nil
+	})
+
+	return results, err
+}
