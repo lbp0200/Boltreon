@@ -122,7 +122,9 @@ func (dec *RDBDecoder) readExpireTime() (int64, error) {
 		return int64(sec), nil
 	}
 	// 不是过期时间，将字节放回
-	dec.buf.UnreadByte()
+	if err := dec.buf.UnreadByte(); err != nil {
+		logger.Logger.Warn().Err(err).Msg("Failed to unread byte")
+	}
 	return 0, nil
 }
 

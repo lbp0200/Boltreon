@@ -35,15 +35,15 @@ go mod tidy
 ## Architecture
 
 ```
-cmd/boltDB/main.go    → Entry point with CLI args (-addr, -dir, -log-level, -cluster)
-cmd/sentinel/         → Sentinel instance for HA
+cmd/boltDB/main.go    → Entry point with CLI args (-addr, -dir, -log-level, -cluster, -replicaof)
+cmd/sentinel/         → Sentinel instance for HA (standalone mode)
 cmd/integration/      → Integration tests (uses real server + go-redis client)
 internal/
   ├── server/          → Redis protocol command handler (SET, GET, HSET, etc.)
   ├── store/           → BadgerDB storage layer (String, List, Hash, Set, SortedSet, TimeSeries, JSON)
-  ├── cluster/         → Redis Cluster with 16384 slots, CRC-16/XModem hashing
-  ├── replication/     → Master-slave replication, PSYNC, RDB transmission, backlog
-  ├── sentinel/        → Sentinel failover implementation
+  ├── cluster/         → Redis Cluster with 16384 slots, CRC-16/XModem hashing, slot migration
+  ├── replication/     → Master-slave replication, PSYNC, RDB transmission, backlog, RDB loader
+  ├── sentinel/        → Sentinel failover implementation (gossip, network, failover, master, sentinel)
   ├── proto/           → RESP protocol parser/writer
   └── logger/          → zerolog structured logging
 ```
@@ -53,8 +53,9 @@ internal/
 - **Storage**: BadgerDB with key prefixes (`string:key`, `list:key:*`, `hash:key`, `set:key`, `zset:key`)
 - **Data Types**: Defined in `internal/store/define.go` (KeyTypeString, KeyTypeList, KeyTypeHash, KeyTypeSet, KeyTypeSortedSet, KeyTypeTimeSeries, KeyTypeJSON)
 - **Thread Safety**: Uses `sync.RWMutex` for shared state protection
-- **Cluster**: 16384 slots with CRC-16/XModem hashing, supports hash tags `{tag}` for colocation, MOVED redirects
-- **Replication**: PSYNC protocol with 1MB default backlog buffer, RDB snapshot generation
+- **Cluster**: 16384 slots with CRC-16/XModem hashing, supports hash tags `{tag}` for colocation, MOVED/ASK redirects, slot migration
+- **Replication**: PSYNC protocol with 1MB default backlog buffer, RDB snapshot generation, RDB loader for full sync
+- **Sentinel**: Internal sentinel implementation with gossip protocol, ODown detection, automatic failover
 
 ## Cluster Mode
 
@@ -75,11 +76,20 @@ BoltDB supports Redis Cluster mode with the `-cluster` flag. When enabled:
 - `CLUSTER SETSLOT <slot> <IMPORTING|MIGRATING|STABLE|NODE> ...` - Slot migration
 - `CLUSTER FORGET <nodeid>` - Remove a node
 - `CLUSTER REPLICATE <nodeid>` - Make this node a replica
+- `ASKING` - Client-side command to ask about migrating keys
 
 ### Slot Redirect Behavior
-- Commands return `MOVED <slot> <addr>` when key belongs to another node
+- `MOVED <slot> <addr>` - Permanent redirect (key's slot permanently on another node)
+- `ASK <slot> <addr>` - Ask redirect (key temporarily migrating)
 - Single-key commands: SET, GET, DEL, EXISTS, TYPE, INCR, DECR, etc.
 - Multi-key commands: MGET, MSET, DEL (multiple keys)
+
+### Slot Migration
+When migrating slots between nodes:
+1. Destination node: `CLUSTER SETSLOT <slot> IMPORTING <source-node-id>`
+2. Source node: `CLUSTER SETSLOT <slot> MIGRATING <dest-node-id>`
+3. Client sends `ASKING` before accessing keys in migrating slot
+4. Returns `ASK <slot> <addr>` redirect if key not yet migrated
 
 ## Redis-Sentinel Compatibility
 
@@ -107,6 +117,37 @@ BoltDB supports being managed by redis-sentinel. Key compatibility features:
 # Start slave on port 6380
 ./build/boltDB -dir=/tmp/slave -replicaof 127.0.0.1 6379
 ```
+
+### RDB Loader
+The RDB loader (`internal/replication/rdb_loader.go`) handles loading RDB snapshots during full sync:
+- Supports all data types: String, List, Set, Hash, SortedSet
+- Correctly handles TTL/expiration times
+- `LoadRDB()` - loads RDB from reader into replication stream
+- `LoadRDBWithStore()` - loads RDB directly into store
+
+### Sentinel Failover Implementation
+BoltDB includes internal sentinel implementation for automatic failover:
+
+#### Network Commands (`internal/sentinel/network.go`)
+- `SendSlaveOfNoOne()` - Promotes slave to master via `SLAVEOF NO ONE`
+- `SendReplicaOf()` - Configures slave to replicate new master via `REPLICAOF`
+- `SendPing()` - Health check
+- `GetRole()` - Get node role (master/slave)
+
+#### Gossip Protocol (`internal/sentinel/gossip.go`)
+- `GossipProtocol` manages peer connections between sentinels
+- Hello/Ping/Pong message handling
+- `BroadcastSdown()` - Broadcasts subjective down events to other sentinels
+
+#### Automatic Failover (`internal/sentinel/failover.go`)
+- `AutoFailover()` - Entry point for automatic failover
+- Sends real `SLAVEOF NO ONE` and `REPLICAOF` commands
+- Coordinates slave promotion
+
+#### ODown Detection (`internal/sentinel/master.go`)
+- `IsODown()` - Checks if quorum is reached for objective down
+- `sdownCount` and `knownSentinelCount` tracking
+- `GetBestSlave()` - Selects best slave for promotion based on priority and replication offset
 
 ## Testing
 
@@ -164,6 +205,9 @@ Key imports: `github.com/dgraph-io/badger/v4`, `github.com/redis/go-redis/v9`, `
 
 ## Redis-Sentinel Setup
 
+BoltDB supports two sentinel modes:
+
+### External Redis Sentinel
 BoltDB can be monitored by redis-sentinel. Example configuration:
 
 ```bash
@@ -179,16 +223,20 @@ Start sentinel:
 redis-server sentinel.conf --sentinel
 ```
 
-BoltDB nodes should be started as:
+### Internal Sentinel Implementation
+BoltDB includes a built-in sentinel implementation (`internal/sentinel/`) for automatic failover:
+
+Key components:
+- `sentinel.go` - Main sentinel logic and gossip protocol handler
+- `master.go` - Master monitoring, ODown detection, slave selection
+- `failover.go` - Automatic failover coordination
+- `network.go` - Network commands (SLAVEOF NO ONE, REPLICAOF, PING, ROLE)
+- `gossip.go` - Gossip protocol for peer communication
+
+Start sentinel (standalone):
 ```bash
-# Master
-./build/boltDB -addr=:6379 -dir=/tmp/master
-
-# Slave
-./build/boltDB -addr=:6380 -dir=/tmp/slave -replicaof 127.0.0.1 6379
+go run cmd/sentinel/main.go
 ```
-
-Sentinel will monitor these nodes and perform automatic failover.
 
 ## Cluster Setup
 

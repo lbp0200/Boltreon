@@ -60,7 +60,11 @@ func SendSlaveOfNoOne(addr string) error {
 	if err != nil {
 		return err
 	}
-	defer sc.Close()
+	defer func() {
+		if err := sc.Close(); err != nil {
+			logger.Logger.Debug().Err(err).Msg("Failed to close sentinel connection")
+		}
+	}()
 
 	// 发送 SLAVEOF NO ONE
 	cmd := "*3\r\n$8\r\nSLAVEOF\r\n$2\r\nNO\r\n$3\r\nONE\r\n"
@@ -88,7 +92,11 @@ func SendReplicaOf(slaveAddr, masterAddr string) error {
 	if err != nil {
 		return err
 	}
-	defer sc.Close()
+	defer func() {
+		if err := sc.Close(); err != nil {
+			logger.Logger.Debug().Err(err).Msg("Failed to close sentinel connection")
+		}
+	}()
 
 	// 解析master地址
 	masterHost, masterPort, err := net.SplitHostPort(masterAddr)
@@ -127,7 +135,11 @@ func SendPing(addr string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	defer sc.Close()
+	defer func() {
+		if err := sc.Close(); err != nil {
+			logger.Logger.Debug().Err(err).Msg("Failed to close sentinel connection")
+		}
+	}()
 
 	// 发送 PING
 	cmd := "*1\r\n$4\r\nPING\r\n"
@@ -150,7 +162,11 @@ func SendInfoReplication(addr string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer sc.Close()
+	defer func() {
+		if err := sc.Close(); err != nil {
+			logger.Logger.Debug().Err(err).Msg("Failed to close sentinel connection")
+		}
+	}()
 
 	// 发送 INFO replication
 	cmd := "*2\r\n$4\r\nINFO\r\n$11\r\nreplication\r\n"
@@ -180,7 +196,11 @@ func GetRole(addr string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer sc.Close()
+	defer func() {
+		if err := sc.Close(); err != nil {
+			logger.Logger.Debug().Err(err).Msg("Failed to close sentinel connection")
+		}
+	}()
 
 	// 发送 ROLE
 	cmd := "*1\r\n$4\r\nROLE\r\n"

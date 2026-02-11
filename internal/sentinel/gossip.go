@@ -89,7 +89,9 @@ func (gp *GossipProtocol) Stop() {
 	close(gp.stopCh)
 
 	if gp.listener != nil {
-		gp.listener.Close()
+		if err := gp.listener.Close(); err != nil {
+			logger.Logger.Warn().Err(err).Msg("Failed to close gossip listener")
+		}
 	}
 
 	for _, peer := range gp.peers {
@@ -115,7 +117,9 @@ func (gp *GossipProtocol) acceptConnections() {
 		}
 
 		if tcpListener, ok := gp.listener.(*net.TCPListener); ok {
-			tcpListener.SetDeadline(time.Now().Add(1 * time.Second))
+			if err := tcpListener.SetDeadline(time.Now().Add(1 * time.Second)); err != nil {
+				logger.Logger.Debug().Err(err).Msg("Failed to set deadline on listener")
+			}
 		}
 
 		conn, err := gp.listener.Accept()
@@ -133,7 +137,11 @@ func (gp *GossipProtocol) acceptConnections() {
 
 // handleConnection 处理传入连接
 func (gp *GossipProtocol) handleConnection(conn net.Conn) {
-	defer conn.Close()
+	defer func() {
+		if err := conn.Close(); err != nil {
+			logger.Logger.Debug().Err(err).Msg("Failed to close gossip connection")
+		}
+	}()
 
 	reader := bufio.NewReader(conn)
 
@@ -145,7 +153,9 @@ func (gp *GossipProtocol) handleConnection(conn net.Conn) {
 		}
 
 		if tcpConn, ok := conn.(*net.TCPConn); ok {
-			tcpConn.SetDeadline(time.Now().Add(30 * time.Second))
+			if err := tcpConn.SetDeadline(time.Now().Add(30 * time.Second)); err != nil {
+				logger.Logger.Debug().Err(err).Msg("Failed to set deadline on connection")
+			}
 		}
 
 		line, err := reader.ReadString('\n')
@@ -205,7 +215,9 @@ func (gp *GossipProtocol) handleHello(conn net.Conn, parts []string) {
 
 	// 发送PONG响应
 	response := gp.formatPong()
-	gp.sendMessage(conn, response)
+	if err := gp.sendMessage(conn, response); err != nil {
+		logger.Logger.Warn().Err(err).Msg("Failed to send PONG response")
+	}
 }
 
 // handlePing 处理PING消息
@@ -214,7 +226,9 @@ func (gp *GossipProtocol) handlePing(conn net.Conn) {
 	gp.touchPeer(peerAddr)
 
 	response := gp.formatPong()
-	gp.sendMessage(conn, response)
+	if err := gp.sendMessage(conn, response); err != nil {
+		logger.Logger.Warn().Err(err).Msg("Failed to send PONG response")
+	}
 }
 
 // handlePong 处理PONG消息
@@ -282,7 +296,9 @@ func (gp *GossipProtocol) handleMasters(conn net.Conn) {
 	data, _ := json.Marshal(masters)
 
 	response := "MASTERS " + string(data) + "\n"
-	gp.sendMessage(conn, response)
+	if err := gp.sendMessage(conn, response); err != nil {
+		logger.Logger.Warn().Err(err).Msg("Failed to send MASTERS response")
+	}
 }
 
 // addOrUpdatePeer 添加或更新对等体
@@ -351,7 +367,11 @@ func (gp *GossipProtocol) sendHello(addr string) error {
 	if err != nil {
 		return err
 	}
-	defer conn.Close()
+	defer func() {
+		if err := conn.Close(); err != nil {
+			logger.Logger.Debug().Err(err).Msg("Failed to close gossip connection")
+		}
+	}()
 
 	response := gp.formatHello()
 	return gp.sendMessage(conn, response)
@@ -385,9 +405,15 @@ func (gp *GossipProtocol) BroadcastSdown(masterName string, sdownCount int) {
 			if err != nil {
 				return
 			}
-			defer conn.Close()
+			defer func() {
+		if err := conn.Close(); err != nil {
+			logger.Logger.Debug().Err(err).Msg("Failed to close gossip connection")
+		}
+	}()
 
-			gp.sendMessage(conn, message)
+			if err := gp.sendMessage(conn, message); err != nil {
+				logger.Logger.Warn().Err(err).Msg("Failed to broadcast SDOWN message")
+			}
 		}(addr)
 	}
 }
