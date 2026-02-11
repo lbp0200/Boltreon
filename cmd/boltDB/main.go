@@ -5,8 +5,9 @@ import (
 	"net"
 	"os"
 
-	"github.com/lbp0200/BoltDB/internal/logger"
 	"github.com/lbp0200/BoltDB/internal/backup"
+	"github.com/lbp0200/BoltDB/internal/cluster"
+	"github.com/lbp0200/BoltDB/internal/logger"
 	"github.com/lbp0200/BoltDB/internal/replication"
 	"github.com/lbp0200/BoltDB/internal/server"
 
@@ -17,6 +18,7 @@ func main() {
 	addr := flag.String("addr", ":6379", "listen addr")
 	dbPath := flag.String("dir", os.TempDir(), "badger dir")
 	logLevel := flag.String("log-level", "", "log level: DEBUG, INFO, WARNING, ERROR (default: WARNING, or from BOLTDB_LOG_LEVEL env)")
+	clusterEnabled := flag.Bool("cluster", false, "enable cluster mode")
 	flag.Parse()
 
 	// 设置日志级别
@@ -54,6 +56,16 @@ func main() {
 		Replication: replMgr,
 		Backup:      backupMgr,
 		PubSub:      pubsubMgr,
+	}
+
+	// 初始化集群（如果启用了集群模式）
+	if *clusterEnabled {
+		c, err := cluster.NewCluster(db, "", *addr)
+		if err != nil {
+			logger.Logger.Fatal().Err(err).Msg("Failed to create cluster")
+		}
+		handler.Cluster = c
+		logger.Logger.Info().Msg("Cluster mode enabled")
 	}
 	ln, err := net.Listen("tcp", *addr)
 	if err != nil {

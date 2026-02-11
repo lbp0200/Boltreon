@@ -254,3 +254,35 @@ func (rm *ReplicationManager) IsMaster() bool {
 func (rm *ReplicationManager) IsSlave() bool {
 	return rm.GetRole() == RoleSlave
 }
+
+// UpdateSlaveAckOffset 更新从节点的ACK偏移量
+func (rm *ReplicationManager) UpdateSlaveAckOffset(slaveID string, offset int64) {
+	rm.mu.RLock()
+	defer rm.mu.RUnlock()
+	if slave, exists := rm.slaves[slaveID]; exists {
+		slave.UpdateReplAck(offset)
+		logger.Logger.Debug().
+			Str("slave_id", slaveID).
+			Int64("ack_offset", offset).
+			Msg("更新从节点ACK偏移量")
+	}
+}
+
+// GetSlaveByID 根据ID获取从节点
+func (rm *ReplicationManager) GetSlaveByID(slaveID string) *SlaveConnection {
+	rm.mu.RLock()
+	defer rm.mu.RUnlock()
+	return rm.slaves[slaveID]
+}
+
+// GetSlaveByAddr 根据地址获取从节点
+func (rm *ReplicationManager) GetSlaveByAddr(addr string) *SlaveConnection {
+	rm.mu.RLock()
+	defer rm.mu.RUnlock()
+	for _, slave := range rm.slaves {
+		if slave.Addr == addr {
+			return slave
+		}
+	}
+	return nil
+}

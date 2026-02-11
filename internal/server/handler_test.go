@@ -53,7 +53,7 @@ func TestExecuteCommand(t *testing.T) {
 			validate: func(t *testing.T, resp proto.RESP) {
 				assert.Equal(t, proto.OK, resp)
 				// Test GET
-				getResp := handler.executeCommand("GET", [][]byte{[]byte("key1")})
+				getResp := handler.executeCommand("GET", [][]byte{[]byte("key1")}, "127.0.0.1:12345")
 				bulk, ok := getResp.(*proto.BulkString)
 				assert.True(t, ok)
 				assert.Equal(t, "value1", string(*bulk))
@@ -103,7 +103,7 @@ func TestExecuteCommand(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			resp := handler.executeCommand(tt.cmd, tt.args)
+			resp := handler.executeCommand(tt.cmd, tt.args, "127.0.0.1:12345")
 			tt.validate(t, resp)
 		})
 	}
@@ -310,19 +310,19 @@ func TestListCommands(t *testing.T) {
 	defer handler.Db.Close()
 
 	// LPUSH
-	resp := handler.executeCommand("LPUSH", [][]byte{[]byte("mylist"), []byte("world"), []byte("hello")})
+	resp := handler.executeCommand("LPUSH", [][]byte{[]byte("mylist"), []byte("world"), []byte("hello")}, "127.0.0.1:12345")
 	integer, ok := resp.(*proto.Integer)
 	assert.True(t, ok)
 	assert.Equal(t, int64(2), int64(*integer))
 
 	// LLEN
-	resp = handler.executeCommand("LLEN", [][]byte{[]byte("mylist")})
+	resp = handler.executeCommand("LLEN", [][]byte{[]byte("mylist")}, "127.0.0.1:12345")
 	integer, ok = resp.(*proto.Integer)
 	assert.True(t, ok)
 	assert.Equal(t, int64(2), int64(*integer))
 
 	// LPOP
-	resp = handler.executeCommand("LPOP", [][]byte{[]byte("mylist")})
+	resp = handler.executeCommand("LPOP", [][]byte{[]byte("mylist")}, "127.0.0.1:12345")
 	bulk, ok := resp.(*proto.BulkString)
 	assert.True(t, ok)
 	assert.Equal(t, "hello", string(*bulk))
@@ -334,19 +334,19 @@ func TestHashCommands(t *testing.T) {
 	defer handler.Db.Close()
 
 	// HSET
-	resp := handler.executeCommand("HSET", [][]byte{[]byte("user:1"), []byte("name"), []byte("Alice"), []byte("age"), []byte("30")})
+	resp := handler.executeCommand("HSET", [][]byte{[]byte("user:1"), []byte("name"), []byte("Alice"), []byte("age"), []byte("30")}, "127.0.0.1:12345")
 	integer, ok := resp.(*proto.Integer)
 	assert.True(t, ok)
 	assert.Equal(t, int64(2), int64(*integer))
 
 	// HGET
-	resp = handler.executeCommand("HGET", [][]byte{[]byte("user:1"), []byte("name")})
+	resp = handler.executeCommand("HGET", [][]byte{[]byte("user:1"), []byte("name")}, "127.0.0.1:12345")
 	bulk, ok := resp.(*proto.BulkString)
 	assert.True(t, ok)
 	assert.Equal(t, "Alice", string(*bulk))
 
 	// HLEN
-	resp = handler.executeCommand("HLEN", [][]byte{[]byte("user:1")})
+	resp = handler.executeCommand("HLEN", [][]byte{[]byte("user:1")}, "127.0.0.1:12345")
 	integer, ok = resp.(*proto.Integer)
 	assert.True(t, ok)
 	assert.Equal(t, int64(2), int64(*integer))
@@ -358,19 +358,19 @@ func TestSetCommands(t *testing.T) {
 	defer handler.Db.Close()
 
 	// SADD
-	resp := handler.executeCommand("SADD", [][]byte{[]byte("myset"), []byte("member1"), []byte("member2")})
+	resp := handler.executeCommand("SADD", [][]byte{[]byte("myset"), []byte("member1"), []byte("member2")}, "127.0.0.1:12345")
 	integer, ok := resp.(*proto.Integer)
 	assert.True(t, ok)
 	assert.Equal(t, int64(2), int64(*integer))
 
 	// SCARD
-	resp = handler.executeCommand("SCARD", [][]byte{[]byte("myset")})
+	resp = handler.executeCommand("SCARD", [][]byte{[]byte("myset")}, "127.0.0.1:12345")
 	integer, ok = resp.(*proto.Integer)
 	assert.True(t, ok)
 	assert.Equal(t, int64(2), int64(*integer))
 
 	// SISMEMBER
-	resp = handler.executeCommand("SISMEMBER", [][]byte{[]byte("myset"), []byte("member1")})
+	resp = handler.executeCommand("SISMEMBER", [][]byte{[]byte("myset"), []byte("member1")}, "127.0.0.1:12345")
 	integer, ok = resp.(*proto.Integer)
 	assert.True(t, ok)
 	assert.Equal(t, int64(1), int64(*integer))
@@ -388,19 +388,19 @@ func TestSortedSetCommands(t *testing.T) {
 		[]byte("member1"),
 		[]byte("2.0"),
 		[]byte("member2"),
-	})
+	}, "127.0.0.1:12345")
 	integer, ok := resp.(*proto.Integer)
 	assert.True(t, ok)
 	assert.Equal(t, int64(2), int64(*integer))
 
 	// ZCARD
-	resp = handler.executeCommand("ZCARD", [][]byte{[]byte("zset")})
+	resp = handler.executeCommand("ZCARD", [][]byte{[]byte("zset")}, "127.0.0.1:12345")
 	integer, ok = resp.(*proto.Integer)
 	assert.True(t, ok)
 	assert.Equal(t, int64(2), int64(*integer))
 
 	// ZSCORE
-	resp = handler.executeCommand("ZSCORE", [][]byte{[]byte("zset"), []byte("member1")})
+	resp = handler.executeCommand("ZSCORE", [][]byte{[]byte("zset"), []byte("member1")}, "127.0.0.1:12345")
 	bulk, ok := resp.(*proto.BulkString)
 	assert.True(t, ok)
 	assert.Equal(t, "1", string(*bulk))
@@ -450,7 +450,7 @@ func TestErrorHandling(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			resp := handler.executeCommand(tt.cmd, tt.args)
+			resp := handler.executeCommand(tt.cmd, tt.args, "127.0.0.1:12345")
 			err, ok := resp.(*proto.Error)
 			if tt.wantErr {
 				assert.True(t, ok)
@@ -534,8 +534,8 @@ func BenchmarkExecuteCommand(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		key := fmt.Sprintf("key%d", i)
 		value := fmt.Sprintf("value%d", i)
-		_ = handler.executeCommand("SET", [][]byte{[]byte(key), []byte(value)})
-		_ = handler.executeCommand("GET", [][]byte{[]byte(key)})
+		_ = handler.executeCommand("SET", [][]byte{[]byte(key), []byte(value)}, "127.0.0.1:12345")
+		_ = handler.executeCommand("GET", [][]byte{[]byte(key)}, "127.0.0.1:12345")
 	}
 }
 

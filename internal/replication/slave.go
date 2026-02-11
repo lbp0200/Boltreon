@@ -108,12 +108,12 @@ func (sc *SlaveConnection) SendCommand(cmdBytes []byte, offset int64) error {
 	return nil
 }
 
-// SendRDB 发送RDB数据到从节点
+// SendRDB 发送RDB数据到从节点（RESP协议格式）
 func (sc *SlaveConnection) SendRDB(rdbData []byte) error {
 	sc.mu.Lock()
 	defer sc.mu.Unlock()
 
-	// 发送RDB数据长度
+	// 发送RDB数据长度（使用RESP Bulk String格式）
 	header := fmt.Sprintf("$%d\r\n", len(rdbData))
 	if _, err := sc.Writer.WriteString(header); err != nil {
 		return fmt.Errorf("write RDB header failed: %w", err)
@@ -122,6 +122,11 @@ func (sc *SlaveConnection) SendRDB(rdbData []byte) error {
 	// 发送RDB数据
 	if _, err := sc.Writer.Write(rdbData); err != nil {
 		return fmt.Errorf("write RDB data failed: %w", err)
+	}
+
+	// 发送\r\n结尾
+	if _, err := sc.Writer.WriteString("\r\n"); err != nil {
+		return fmt.Errorf("write RDB trailing CRLF failed: %w", err)
 	}
 
 	// 刷新缓冲区

@@ -63,6 +63,42 @@ type TransactionCommand struct {
 	Args    [][]byte
 }
 
+// checkAndHandleRedirect 检查键是否需要重定向到其他节点
+// 返回 nil 表示不需要重定向，可以继续执行命令
+// 返回非 nil 表示需要重定向，包含重定向信息
+func (h *Handler) checkAndHandleRedirect(key string) proto.RESP {
+	if h.Cluster == nil {
+		return nil // 不在集群模式，直接执行
+	}
+	redirect := h.Cluster.CheckSlotRedirect(key)
+	if redirect != nil {
+		return proto.NewError(redirect.Error())
+	}
+	return nil
+}
+
+// checkAndHandleMultiKeyRedirect 检查多个键是否需要重定向
+// 如果所有键都在当前节点，返回 nil
+// 如果有键需要重定向，返回 MOVED 错误
+func (h *Handler) checkAndHandleMultiKeyRedirect(keys []string) proto.RESP {
+	if h.Cluster == nil {
+		return nil // 不在集群模式，直接执行
+	}
+	var movedError *cluster.RedirectError
+	for _, key := range keys {
+		redirect := h.Cluster.CheckSlotRedirect(key)
+		if redirect != nil {
+			if redirect.Type == "MOVED" {
+				movedError = redirect
+			}
+		}
+	}
+	if movedError != nil {
+		return proto.NewError(movedError.Error())
+	}
+	return nil
+}
+
 // ServeTCP 监听并处理连接
 func (h *Handler) ServeTCP(l net.Listener) error {
 	for {
@@ -116,7 +152,7 @@ func (h *Handler) handleConnection(conn net.Conn) {
 		commandsProcessed := 0
 
 		// 处理第一个命令
-		if resp := h.processRequest(req, reader, remoteAddr); resp != nil {
+		if resp := h.processRequest(req, reader, remoteAddr, writer); resp != nil {
 			responses = append(responses, resp)
 			commandsProcessed++
 		} else {
@@ -133,7 +169,7 @@ func (h *Handler) handleConnection(conn net.Conn) {
 				break
 			}
 
-			if resp := h.processRequest(req, reader, remoteAddr); resp != nil {
+			if resp := h.processRequest(req, reader, remoteAddr, writer); resp != nil {
 				responses = append(responses, resp)
 				commandsProcessed++
 			} else {
@@ -170,7 +206,8 @@ func (h *Handler) handleConnection(conn net.Conn) {
 }
 
 // processRequest 处理单个请求，返回响应
-func (h *Handler) processRequest(req *proto.Array, _ *bufio.Reader, remoteAddr string) proto.RESP {
+// PSYNC特殊处理：如果需要全量同步，会在返回响应后发送RDB数据
+func (h *Handler) processRequest(req *proto.Array, reader *bufio.Reader, remoteAddr string, writer *bufio.Writer) proto.RESP {
 	args := req.Args
 	if len(args) == 0 {
 		logger.Logger.Warn().Str("remote_addr", remoteAddr).Msg("收到空命令")
@@ -183,7 +220,12 @@ func (h *Handler) processRequest(req *proto.Array, _ *bufio.Reader, remoteAddr s
 		Int("arg_count", len(args)-1).
 		Msg("执行命令")
 
-	resp := h.executeCommand(cmd, args[1:])
+	// PSYNC特殊处理
+	if cmd == "PSYNC" && h.Replication != nil && h.Replication.IsMaster() {
+		return h.handlePSyncWithRDB(args[1:], remoteAddr, writer)
+	}
+
+	resp := h.executeCommand(cmd, args[1:], remoteAddr)
 	if resp == nil {
 		logger.Logger.Error().
 			Str("remote_addr", remoteAddr).
@@ -226,11 +268,128 @@ func getResponseType(resp proto.RESP) string {
 	}
 }
 
-func (h *Handler) executeCommand(cmd string, args [][]byte) proto.RESP {
+// handlePSyncWithRDB 处理PSYNC命令并发送RDB数据（全量同步）
+// 这是executeCommand的特例，用于在全量同步时直接发送RDB数据
+func (h *Handler) handlePSyncWithRDB(args [][]byte, remoteAddr string, writer *bufio.Writer) proto.RESP {
+	if len(args) < 2 {
+		return proto.NewError("ERR wrong number of arguments for 'PSYNC' command")
+	}
+
+	replId := string(args[0])
+	offset, err := strconv.ParseInt(string(args[1]), 10, 64)
+	if err != nil {
+		return proto.NewError("ERR invalid offset")
+	}
+
+	// 处理PSYNC
+	result, err := replication.HandlePSync(h.Replication, replId, offset)
+	if err != nil {
+		return proto.NewError(fmt.Sprintf("ERR %v", err))
+	}
+
+	if result.FullResync {
+		// 发送FULLRESYNC响应
+		response := fmt.Sprintf("+FULLRESYNC %s %d\r\n", result.ReplId, result.Offset)
+
+		// 先发送FULLRESYNC响应
+		if _, err := writer.WriteString(response); err != nil {
+			logger.Logger.Error().Err(err).Msg("发送FULLRESYNC失败")
+			return proto.NewError("ERR failed to send FULLRESYNC")
+		}
+
+		// 生成并发送RDB数据
+		rdbData, err := replication.GenerateRDB(h.Db)
+		if err != nil {
+			logger.Logger.Error().Err(err).Msg("生成RDB数据失败")
+			return proto.NewError("ERR failed to generate RDB")
+		}
+
+		// 发送RDB数据（Bulk String格式）
+		rdbHeader := fmt.Sprintf("$%d\r\n", len(rdbData))
+		if _, err := writer.WriteString(rdbHeader); err != nil {
+			logger.Logger.Error().Err(err).Msg("发送RDB header失败")
+			return proto.NewError("ERR failed to send RDB header")
+		}
+
+		if _, err := writer.Write(rdbData); err != nil {
+			logger.Logger.Error().Err(err).Msg("发送RDB数据失败")
+			return proto.NewError("ERR failed to send RDB data")
+		}
+
+		if _, err := writer.WriteString("\r\n"); err != nil {
+			logger.Logger.Error().Err(err).Msg("发送RDB尾部失败")
+			return proto.NewError("ERR failed to send RDB trailer")
+		}
+
+		if err := writer.Flush(); err != nil {
+			logger.Logger.Error().Err(err).Msg("刷新writer失败")
+			return proto.NewError("ERR failed to flush writer")
+		}
+
+		logger.Logger.Info().
+			Str("slave_addr", remoteAddr).
+			Str("repl_id", result.ReplId).
+			Int64("offset", result.Offset).
+			Int("rdb_size", len(rdbData)).
+			Msg("发送FULLRESYNC和RDB到从节点")
+
+		// 返回空响应，因为我们已经直接发送了
+		return proto.NewSimpleString("OK")
+	} else {
+		// 发送CONTINUE响应
+		response := fmt.Sprintf("+CONTINUE %s\r\n", result.ReplId)
+		return proto.NewSimpleString(strings.TrimSpace(response))
+	}
+}
+
+func (h *Handler) executeCommand(cmd string, args [][]byte, remoteAddr string) proto.RESP {
 	switch cmd {
 	// 连接命令
 	case "PING":
 		return proto.NewSimpleString("PONG")
+
+	case "ROLE":
+		// 返回角色信息，兼容 redis-sentinel
+		// 格式: [master|slave|sentinel, master地址, 复制偏移量]
+		// 对于主节点: ["master", "repl_offset"]
+		// 对于从节点: ["slave", "master地址", master端口, 状态, 已同步偏移量]
+		if h.Replication != nil {
+			role := h.Replication.GetRole()
+			if role == "master" {
+				offset := h.Replication.GetMasterReplOffset()
+				return &proto.Array{Args: [][]byte{
+					[]byte("master"),
+					[]byte(strconv.FormatInt(offset, 10)),
+				}}
+			} else {
+				// 从节点
+				masterAddr := h.Replication.GetMasterAddr()
+				masterHost := ""
+				masterPort := "6379"
+				if masterAddr != "" {
+					parts := strings.Split(masterAddr, ":")
+					if len(parts) >= 2 {
+						masterHost = parts[0]
+						masterPort = parts[1]
+					} else if len(parts) == 1 {
+						masterHost = parts[0]
+					}
+				}
+				offset := h.Replication.GetMasterReplOffset()
+				return &proto.Array{Args: [][]byte{
+					[]byte("slave"),
+					[]byte(masterHost),
+					[]byte(masterPort),
+					[]byte("connected"),
+					[]byte(strconv.FormatInt(offset, 10)),
+				}}
+			}
+		}
+		// 默认主节点
+		return &proto.Array{Args: [][]byte{
+			[]byte("master"),
+			[]byte("0"),
+		}}
 
 	case "ECHO":
 		if len(args) < 1 {
@@ -294,6 +453,10 @@ func (h *Handler) executeCommand(cmd string, args [][]byte) proto.RESP {
 			return proto.NewError("ERR wrong number of arguments for 'SET' command")
 		}
 		key, value := string(args[0]), string(args[1])
+		// 检查集群重定向
+		if resp := h.checkAndHandleRedirect(key); resp != nil {
+			return resp
+		}
 		if err := h.Db.Set(key, value); err != nil {
 			return proto.NewError(fmt.Sprintf("ERR %v", err))
 		}
@@ -304,6 +467,10 @@ func (h *Handler) executeCommand(cmd string, args [][]byte) proto.RESP {
 			return proto.NewError("ERR wrong number of arguments for 'GET' command")
 		}
 		key := string(args[0])
+		// 检查集群重定向
+		if resp := h.checkAndHandleRedirect(key); resp != nil {
+			return resp
+		}
 		value, err := h.Db.Get(key)
 		if err != nil {
 			if errors.Is(err, store.ErrKeyNotFound) {
@@ -371,6 +538,10 @@ func (h *Handler) executeCommand(cmd string, args [][]byte) proto.RESP {
 		for i, arg := range args {
 			keys[i] = string(arg)
 		}
+		// 检查集群重定向
+		if resp := h.checkAndHandleMultiKeyRedirect(keys); resp != nil {
+			return resp
+		}
 		values, err := h.Db.MGet(keys...)
 		if err != nil {
 			return proto.NewError(fmt.Sprintf("ERR %v", err))
@@ -393,6 +564,14 @@ func (h *Handler) executeCommand(cmd string, args [][]byte) proto.RESP {
 		for i, arg := range args {
 			pairs[i] = string(arg)
 		}
+		// 检查集群重定向（取所有键中的第一个作为检查点）
+		keys := make([]string, 0, len(args)/2)
+		for i := 0; i < len(args); i += 2 {
+			keys = append(keys, string(args[i]))
+		}
+		if resp := h.checkAndHandleMultiKeyRedirect(keys); resp != nil {
+			return resp
+		}
 		if err := h.Db.MSet(pairs...); err != nil {
 			return proto.NewError(fmt.Sprintf("ERR %v", err))
 		}
@@ -406,6 +585,14 @@ func (h *Handler) executeCommand(cmd string, args [][]byte) proto.RESP {
 		for i, arg := range args {
 			pairs[i] = string(arg)
 		}
+		// 检查集群重定向（取所有键中的第一个作为检查点）
+		keys := make([]string, 0, len(args)/2)
+		for i := 0; i < len(args); i += 2 {
+			keys = append(keys, string(args[i]))
+		}
+		if resp := h.checkAndHandleMultiKeyRedirect(keys); resp != nil {
+			return resp
+		}
 		success, err := h.Db.MSetNX(pairs...)
 		if err != nil {
 			return proto.NewError(fmt.Sprintf("ERR %v", err))
@@ -417,6 +604,10 @@ func (h *Handler) executeCommand(cmd string, args [][]byte) proto.RESP {
 			return proto.NewError("ERR wrong number of arguments for 'INCR' command")
 		}
 		key := string(args[0])
+		// 检查集群重定向
+		if resp := h.checkAndHandleRedirect(key); resp != nil {
+			return resp
+		}
 		value, err := h.Db.INCR(key)
 		if err != nil {
 			return proto.NewError(fmt.Sprintf("ERR %v", err))
@@ -428,6 +619,10 @@ func (h *Handler) executeCommand(cmd string, args [][]byte) proto.RESP {
 			return proto.NewError("ERR wrong number of arguments for 'INCRBY' command")
 		}
 		key := string(args[0])
+		// 检查集群重定向
+		if resp := h.checkAndHandleRedirect(key); resp != nil {
+			return resp
+		}
 		increment, err := strconv.ParseInt(string(args[1]), 10, 64)
 		if err != nil {
 			return proto.NewError("ERR value is not an integer or out of range")
@@ -443,6 +638,10 @@ func (h *Handler) executeCommand(cmd string, args [][]byte) proto.RESP {
 			return proto.NewError("ERR wrong number of arguments for 'DECR' command")
 		}
 		key := string(args[0])
+		// 检查集群重定向
+		if resp := h.checkAndHandleRedirect(key); resp != nil {
+			return resp
+		}
 		value, err := h.Db.DECR(key)
 		if err != nil {
 			return proto.NewError(fmt.Sprintf("ERR %v", err))
@@ -454,6 +653,10 @@ func (h *Handler) executeCommand(cmd string, args [][]byte) proto.RESP {
 			return proto.NewError("ERR wrong number of arguments for 'DECRBY' command")
 		}
 		key := string(args[0])
+		// 检查集群重定向
+		if resp := h.checkAndHandleRedirect(key); resp != nil {
+			return resp
+		}
 		decrement, err := strconv.ParseInt(string(args[1]), 10, 64)
 		if err != nil {
 			return proto.NewError("ERR value is not an integer or out of range")
@@ -469,6 +672,10 @@ func (h *Handler) executeCommand(cmd string, args [][]byte) proto.RESP {
 			return proto.NewError("ERR wrong number of arguments for 'INCRBYFLOAT' command")
 		}
 		key := string(args[0])
+		// 检查集群重定向
+		if resp := h.checkAndHandleRedirect(key); resp != nil {
+			return resp
+		}
 		increment, err := strconv.ParseFloat(string(args[1]), 64)
 		if err != nil {
 			return proto.NewError("ERR value is not a valid float")
@@ -484,6 +691,10 @@ func (h *Handler) executeCommand(cmd string, args [][]byte) proto.RESP {
 			return proto.NewError("ERR wrong number of arguments for 'APPEND' command")
 		}
 		key, value := string(args[0]), string(args[1])
+		// 检查集群重定向
+		if resp := h.checkAndHandleRedirect(key); resp != nil {
+			return resp
+		}
 		length, err := h.Db.APPEND(key, value)
 		if err != nil {
 			return proto.NewError(fmt.Sprintf("ERR %v", err))
@@ -496,6 +707,10 @@ func (h *Handler) executeCommand(cmd string, args [][]byte) proto.RESP {
 			return proto.NewError("ERR wrong number of arguments for 'STRLEN' command")
 		}
 		key := string(args[0])
+		// 检查集群重定向
+		if resp := h.checkAndHandleRedirect(key); resp != nil {
+			return resp
+		}
 		length, err := h.Db.StrLen(key)
 		if err != nil {
 			return proto.NewInteger(0)
@@ -657,6 +872,14 @@ func (h *Handler) executeCommand(cmd string, args [][]byte) proto.RESP {
 		if len(args) < 1 {
 			return proto.NewError("ERR wrong number of arguments for 'DEL' command")
 		}
+		keys := make([]string, len(args))
+		for i, arg := range args {
+			keys[i] = string(arg)
+		}
+		// 检查集群重定向
+		if resp := h.checkAndHandleMultiKeyRedirect(keys); resp != nil {
+			return resp
+		}
 		count := int64(0)
 		for _, arg := range args {
 			key := string(arg)
@@ -671,6 +894,14 @@ func (h *Handler) executeCommand(cmd string, args [][]byte) proto.RESP {
 	case "EXISTS":
 		if len(args) < 1 {
 			return proto.NewError("ERR wrong number of arguments for 'EXISTS' command")
+		}
+		keys := make([]string, len(args))
+		for i, arg := range args {
+			keys[i] = string(arg)
+		}
+		// 检查集群重定向
+		if resp := h.checkAndHandleMultiKeyRedirect(keys); resp != nil {
+			return resp
 		}
 		count := 0
 		for _, arg := range args {
@@ -688,6 +919,10 @@ func (h *Handler) executeCommand(cmd string, args [][]byte) proto.RESP {
 			return proto.NewError("ERR wrong number of arguments for 'PFADD' command")
 		}
 		key := string(args[0])
+		// 检查集群重定向
+		if resp := h.checkAndHandleRedirect(key); resp != nil {
+			return resp
+		}
 		elements := make([]string, len(args)-1)
 		for i := 1; i < len(args); i++ {
 			elements[i-1] = string(args[i])
@@ -706,6 +941,10 @@ func (h *Handler) executeCommand(cmd string, args [][]byte) proto.RESP {
 		for i, arg := range args {
 			keys[i] = string(arg)
 		}
+		// 检查集群重定向
+		if resp := h.checkAndHandleMultiKeyRedirect(keys); resp != nil {
+			return resp
+		}
 		count, err := h.Db.PFCount(keys...)
 		if err != nil {
 			return proto.NewError(fmt.Sprintf("ERR %v", err))
@@ -721,6 +960,10 @@ func (h *Handler) executeCommand(cmd string, args [][]byte) proto.RESP {
 		for i := 1; i < len(args); i++ {
 			sourceKeys[i-1] = string(args[i])
 		}
+		// 检查集群重定向
+		if resp := h.checkAndHandleRedirect(destKey); resp != nil {
+			return resp
+		}
 		err := h.Db.PFMerge(destKey, sourceKeys...)
 		if err != nil {
 			return proto.NewError(fmt.Sprintf("ERR %v", err))
@@ -732,6 +975,10 @@ func (h *Handler) executeCommand(cmd string, args [][]byte) proto.RESP {
 			return proto.NewError("ERR wrong number of arguments for 'TYPE' command")
 		}
 		key := string(args[0])
+		// 检查集群重定向
+		if resp := h.checkAndHandleRedirect(key); resp != nil {
+			return resp
+		}
 		keyType, err := h.Db.Type(key)
 		if err != nil {
 			return proto.NewSimpleString("none")
@@ -2714,12 +2961,13 @@ func (h *Handler) executeCommand(cmd string, args [][]byte) proto.RESP {
 		// 根据返回类型转换
 		switch v := result.(type) {
 		case string:
-			return proto.NewSimpleString(v)
+			// 使用 BulkString 以正确处理多行响应（如 CLUSTER INFO）
+			return proto.NewBulkString([]byte(v))
 		case int64:
 			return proto.NewInteger(v)
 		case []string:
 			// 对于CLUSTER NODES，返回多行字符串
-			return proto.NewSimpleString(strings.Join(v, "\n"))
+			return proto.NewBulkString([]byte(strings.Join(v, "\n")))
 		case []interface{}:
 			// 对于CLUSTER SLOTS，返回数组
 			// 简化处理：转换为字符串数组
@@ -2805,34 +3053,8 @@ func (h *Handler) executeCommand(cmd string, args [][]byte) proto.RESP {
 		}
 		return proto.OK
 
-	case "PSYNC":
-		if h.Replication == nil {
-			return proto.NewError("ERR replication not enabled")
-		}
-		if len(args) < 2 {
-			return proto.NewError("ERR wrong number of arguments for 'PSYNC' command")
-		}
-		replId := string(args[0])
-		offset, err := strconv.ParseInt(string(args[1]), 10, 64)
-		if err != nil {
-			return proto.NewError("ERR invalid offset")
-		}
-		// 处理PSYNC（主节点端）
-		result, err := replication.HandlePSync(h.Replication, replId, offset)
-		if err != nil {
-			return proto.NewError(fmt.Sprintf("ERR %v", err))
-		}
-		// 获取当前连接（需要从连接中获取）
-		// 简化实现，实际应该从连接上下文获取
-		if result.FullResync {
-			// 发送FULLRESYNC响应
-			response := fmt.Sprintf("+FULLRESYNC %s %d\r\n", result.ReplId, result.Offset)
-			return proto.NewSimpleString(strings.TrimSpace(response))
-		} else {
-			// 发送CONTINUE响应
-			response := fmt.Sprintf("+CONTINUE %s\r\n", result.ReplId)
-			return proto.NewSimpleString(strings.TrimSpace(response))
-		}
+	// 注意：PSYNC 命令由 processRequest 中的 handlePSyncWithRDB 特殊处理
+	// 这里不需要处理，master 节点会在收到 PSYNC 时直接发送 RDB 数据
 
 	case "REPLCONF":
 		if h.Replication == nil {
@@ -2845,14 +3067,23 @@ func (h *Handler) executeCommand(cmd string, args [][]byte) proto.RESP {
 		switch subcommand {
 		case "LISTENING-PORT":
 			// REPLCONF listening-port <port>
-			// 记录从节点的监听端口
+			// 记录从节点的监听端口，兼容 redis-sentinel
+			if len(args) >= 2 {
+				port := string(args[1])
+				logger.Logger.Debug().Str("remote_addr", remoteAddr).Str("port", port).Msg("从节点监听端口")
+			}
 			return proto.OK
 		case "CAPA":
 			// REPLCONF capa <capability>
-			// 记录从节点的能力
+			// 记录从节点的能力，兼容 redis-sentinel
+			if len(args) >= 2 {
+				capa := string(args[1])
+				logger.Logger.Debug().Str("remote_addr", remoteAddr).Str("capability", capa).Msg("从节点能力")
+			}
 			return proto.OK
 		case "ACK":
 			// REPLCONF ACK <offset>
+			// 从节点确认已复制的偏移量，redis-sentinel 依赖此功能
 			if len(args) < 2 {
 				return proto.NewError("ERR wrong number of arguments for 'REPLCONF ACK' command")
 			}
@@ -2860,19 +3091,34 @@ func (h *Handler) executeCommand(cmd string, args [][]byte) proto.RESP {
 			if err != nil {
 				return proto.NewError("ERR invalid offset")
 			}
-			// 更新从节点的ACK偏移量
-			// 简化实现
-			_ = offset
+			// 使用 remoteAddr 找到对应的从节点并更新 ACK 偏移量
+			if h.Replication.IsMaster() {
+				slave := h.Replication.GetSlaveByAddr(remoteAddr)
+				if slave != nil {
+					slave.UpdateReplAck(offset)
+					logger.Logger.Debug().
+						Str("slave_id", slave.ID).
+						Str("remote_addr", remoteAddr).
+						Int64("ack_offset", offset).
+						Msg("更新从节点ACK偏移量")
+				}
+			}
 			return proto.OK
 		case "GETACK":
 			// REPLCONF GETACK *
-			// 返回当前复制偏移量
+			// 返回当前复制偏移量，兼容 redis-sentinel
 			offset := h.Replication.GetMasterReplOffset()
 			return &proto.Array{Args: [][]byte{
 				[]byte("REPLCONF"),
 				[]byte("ACK"),
 				[]byte(strconv.FormatInt(offset, 10)),
 			}}
+		case "SYNC":
+			// REPLCONF SYNC (用于 PSYNC2)
+			return proto.OK
+		case "NOREPLY":
+			// REPLCONF NOREPLY <yes|no>
+			return proto.OK
 		default:
 			return proto.NewError(fmt.Sprintf("ERR unknown subcommand '%s'", subcommand))
 		}
