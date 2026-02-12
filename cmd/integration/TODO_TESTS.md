@@ -34,18 +34,6 @@
 
 4. `cmd/integration/key_advanced_test.go` - 添加 ZSet DUMP/RESTORE 测试用例
 
-2. `internal/store/base.go` - 重构 `Restore()` 函数：
-   - 解析 RDB 头部（REDIS0009）和版本
-   - 支持毫秒/秒精度过期时间
-   - 完整支持 STRING、LIST、SET、HASH、ZSET 类型恢复
-   - 添加 `restoreLegacy()` 保持向后兼容
-
-3. `internal/replication/rdb.go` - 添加 `WriteSortedSetKeyValue` 方法
-
-4. `internal/server/handler.go` - 更新 RESTORE 命令处理：
-   - 正确解析 TTL 参数（毫秒和 ABSTTL 模式）
-   - 处理二进制数据（[]byte/string 类型）
-
 **验证结果：**
 ```bash
 go test -v ./cmd/integration/... -run "TestDump|TestRestore" -timeout 60s
@@ -90,6 +78,59 @@ go test -v ./cmd/integration/... -run "TestReplicationMasterSlave" -timeout 60s
 
 ---
 
+## Redis 互操作性测试结果
+
+### Redis-Sentinel 兼容性 ✅
+
+| 测试项 | 状态 | 说明 |
+|--------|------|------|
+| `PING` | ✅ PASS | 返回 PONG |
+| `ROLE` | ✅ PASS | 返回 master/slave 角色 |
+| `INFO replication` | ✅ PASS | 返回完整复制状态 |
+| `REPLCONF GETACK` | ✅ PASS | 返回 ACK offset |
+| `SENTINEL MASTER` | ✅ PASS | 返回 master 状态 |
+| 故障检测 | ✅ PASS | 30秒后检测到 master 宕机 |
+| ODOWN 标记 | ✅ PASS | 标记为 s_down, o_down, disconnected |
+
+**测试命令：**
+```bash
+# 启动 BoltDB
+./boltDB --addr=:6379 --dir=/tmp/bolt
+
+# 启动 Redis Sentinel
+redis-server /tmp/sentinel.conf --sentinel
+
+# 验证
+redis-cli -p 26379 SENTINEL MASTER mymaster
+redis-cli -p 6379 ROLE
+redis-cli -p 6379 INFO replication
+```
+
+### BoltDB <-> Redis 复制互操作性
+
+| 场景 | 状态 | 说明 |
+|------|------|------|
+| **BoltDB → Redis** | ✅ PASS | SET, INCR, LPUSH, ZADD, HSET 同步成功 |
+| **Redis → BoltDB** | ❌ 未支持 | BoltDB 未实现 SLAVEOF 命令 |
+| **角色切换** | ✅ PASS | SLAVEOF NO ONE / SLAVEOF 立即生效 |
+| **数据隔离** | ✅ PASS | 两实例数据独立保持 |
+
+**测试命令：**
+```bash
+# 启动 BoltDB master (端口 6380)
+./boltDB --addr=:6380 --dir=/tmp/bolt_master
+
+# 启动 Redis slave (端口 6379)
+redis-server --port 6379 --dir=/tmp/redis_slave
+redis-cli -p 6379 SLAVEOF 127.0.0.1 6380
+
+# 验证复制
+redis-cli -p 6380 SET "test" "hello"
+redis-cli -p 6379 GET "test"  # 返回 "hello"
+```
+
+---
+
 ## 待修复测试
 
 ### Stream 消费者组测试 ✅
@@ -114,22 +155,6 @@ go test -v ./cmd/integration/... -run "TestReplicationMasterSlave" -timeout 60s
 | `TestZRangeByRankWithScores` | `sortedset_advanced_test.go` | ✅ 已通过 |
 | `TestRestore/ZSet` | `key_advanced_test.go` | ✅ 已通过 |
 
-### 复制相关测试
-
-**已通过的自动化测试**（单机模式下自动运行）：
-| 测试 | 状态 | 说明 |
-|------|------|------|
-| `TestReplicationMasterSlaveBasic` | ✅ PASS | 基本键复制 |
-| `TestReplicationMasterSlaveMultipleKeys` | ✅ PASS | 多个键复制 |
-| `TestReplicationMasterSlaveCounter` | ✅ PASS | INCR/DECR 计数器 |
-| `TestReplicationMasterSlaveList` | ✅ PASS | 列表复制 |
-| `TestReplicationMasterSlaveHash` | ✅ PASS | 哈希复制 |
-| `TestReplicationMasterSlaveSet` | ✅ PASS | 集合复制 |
-| `TestReplicationMasterSlaveZSet` | ✅ PASS | 有序集合复制 |
-| `TestReplicationMasterSlaveDEL` | ✅ PASS | 删除复制 |
-| `TestReplicationMasterSlaveInfo` | ✅ PASS | 复制信息 |
-| `TestReplicationMasterSlaveRole` | ✅ PASS | 角色验证 |
-
 ---
 
 ## 修复完成 ✅
@@ -150,6 +175,8 @@ go test -v ./cmd/integration/... -run "TestReplicationMasterSlave" -timeout 60s
 14. ✅ **Stream 消费者组** - XAck, XPending, XInfoGroups, XClaim, XGroupDelConsumer, XRevRange 测试通过
 15. ✅ **XCLAIM 返回类型** - 返回正确格式
 16. ✅ **ZSet 高级命令** - ZRangeByScore, ZRemRangeByScore, ZLex, ZScan, ZRangeByRankWithScores 测试通过
+17. ✅ **Redis-Sentinel 兼容性** - PING, ROLE, INFO, REPLCONF, SENTINEL MASTER, 故障检测全部通过
+18. ✅ **BoltDB → Redis 复制** - SET, INCR, LPUSH, ZADD, HSET 成功同步到 Redis slaves
 
 ---
 
@@ -162,4 +189,32 @@ go test -v ./cmd/integration/... -run "TestReplicationMasterSlave" -timeout 60s
 - 无（所有测试已通过）
 
 ### 低优先级
-- 无
+- **实现 SLAVEOF 命令** - 使 BoltDB 能作为 Redis 的从库
+- **RDB 格式兼容** - 解决 BoltDB 与 Redis RDB 格式差异，支持直接交换快照
+
+---
+
+## 已知限制
+
+### 1. Redis → BoltDB 复制 ❌
+
+**问题**: BoltDB 未实现 SLAVEOF 命令，无法作为 Redis 的从库
+
+**影响**: 无法将 Redis master 的数据复制到 BoltDB
+
+**解决方案**: 实现 SLAVEOF 命令，支持在启动时或运行时配置主库地址
+
+### 2. RDB 格式不兼容 ❌
+
+**问题**: BoltDB 和 Redis 使用不同的 RDB 格式，无法直接交换 RDB 快照文件
+
+**影响**: `BGSAVE` 生成的快照无法被 Redis 加载，`redis-cli BGSAVE` 也无法被 BoltDB 加载
+
+**错误示例**:
+```
+[offset 37] Unexpected EOF reading RDB file
+Reading key 'bolt:hash'
+Reading type 3 (zset-v1)
+```
+
+**解决方案**: 标准化 BoltDB 的 RDB 格式以兼容 Redis RDB 协议
