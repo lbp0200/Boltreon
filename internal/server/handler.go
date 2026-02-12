@@ -1267,17 +1267,17 @@ func (h *Handler) executeCommand(cmd string, args [][]byte, remoteAddr string) p
 		}
 		key := string(args[0])
 		// 解析 TTL（毫秒）
+		var ttl time.Duration = 0
+		replace := false
 		if len(args) > 2 {
 			ttlArg := string(args[1])
 			// 检查是否是 TTL（数字）而不是序列化数据
-			if _, err := strconv.ParseInt(ttlArg, 10, 64); err == nil {
+			if ttlMS, err := strconv.ParseInt(ttlArg, 10, 64); err == nil {
 				// 参数位置偏移：key, ttl, serializedData, [REPLACE|ABSTTL]
 				if len(args) < 4 {
 					return proto.NewError("ERR wrong number of arguments for 'RESTORE' command")
 				}
 				// 序列化数据现在在 args[2]
-				// 检查选项
-				replace := false
 				absttl := false
 				for i := 3; i < len(args); i++ {
 					upper := strings.ToUpper(string(args[i]))
@@ -1287,9 +1287,18 @@ func (h *Handler) executeCommand(cmd string, args [][]byte, remoteAddr string) p
 						absttl = true
 					}
 				}
-				// 注意：TTL 功能在 BoltDB 中简化处理，仅记录
-				_ = absttl
-				err := h.Db.Restore(key, args[2], replace)
+				if absttl {
+					// ABSTTL: TTL 是绝对时间戳（毫秒）
+					now := time.Now().UnixMilli()
+					if ttlMS > now {
+						ttl = time.Duration(ttlMS-now) * time.Millisecond
+					}
+				} else {
+					// TTL 是相对时间（毫秒）
+					ttl = time.Duration(ttlMS) * time.Millisecond
+				}
+				serializedData := string(args[2])
+				err := h.Db.Restore(key, []byte(serializedData), ttl, replace)
 				if err != nil {
 					return proto.NewError(fmt.Sprintf("ERR %v", err))
 				}
@@ -1297,15 +1306,14 @@ func (h *Handler) executeCommand(cmd string, args [][]byte, remoteAddr string) p
 			}
 		}
 		// 旧格式：key, serializedData, [REPLACE]
-		serializedData := args[1]
-		replace := false
+		serializedData := string(args[1])
 		for i := 2; i < len(args); i++ {
 			if strings.ToUpper(string(args[i])) == "REPLACE" {
 				replace = true
 				break
 			}
 		}
-		err := h.Db.Restore(key, serializedData, replace)
+		err := h.Db.Restore(key, []byte(serializedData), ttl, replace)
 		if err != nil {
 			return proto.NewError(fmt.Sprintf("ERR %v", err))
 		}

@@ -175,6 +175,27 @@ func (enc *RDBEncoder) WriteSetKeyValue(key string, members []string, ttl int64)
 	return nil
 }
 
+// WriteSortedSetKeyValue 写入有序集合键值对
+func (enc *RDBEncoder) WriteSortedSetKeyValue(key string, members []*store.ZSetMember, ttl int64) error {
+	if ttl > 0 {
+		now := time.Now().Unix()
+		expireTime := now + ttl
+		enc.buf.WriteByte(0xFD)
+	// #nosec G115 - expireTime is a valid Unix timestamp within uint32 range
+		_ = binary.Write(enc.buf, binary.LittleEndian, uint32(expireTime))
+	}
+
+	enc.buf.WriteByte(4) // ZSET type
+	enc.writeString(key)
+	enc.writeLength(uint64(len(members)))
+	for _, m := range members {
+		enc.writeString(m.Member)
+		scoreBytes := []byte(fmt.Sprintf("%.10g", m.Score))
+		enc.writeBytes(scoreBytes)
+	}
+	return nil
+}
+
 // WriteFooter 写入RDB文件尾
 func (enc *RDBEncoder) WriteFooter() {
 	enc.buf.WriteByte(0xFF) // FF = end of RDB file

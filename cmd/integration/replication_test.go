@@ -41,66 +41,6 @@ func TestReplicationMaster(t *testing.T) {
 	assert.True(t, contains(info, "connected_slaves:"))
 }
 
-// TestReplicationSlave 测试从节点复制
-// 需要主从配置环境，单机模式下跳过
-func TestReplicationSlave(t *testing.T) {
-	t.Skip("需要主从配置环境 - 请使用 -replicaof 参数启动主节点")
-	setupTestServer(t)
-	defer teardownTestServer(t)
-
-	ctx := context.Background()
-
-	// 创建从节点（使用REPLICAOF）
-	result, err := testClient.Do(ctx, "REPLICAOF", "127.0.0.1", "6379").Result()
-	assert.NoError(t, err)
-	assert.Equal(t, "OK", result)
-
-	// INFO replication - 从节点信息
-	result, err = testClient.Do(ctx, "INFO", "replication").Result()
-	assert.NoError(t, err)
-
-	info, ok := result.(string)
-	assert.True(t, ok)
-	assert.True(t, len(info) > 0)
-
-	// 停止复制
-	result, err = testClient.Do(ctx, "REPLICAOF", "NO", "ONE").Result()
-	assert.NoError(t, err)
-	assert.Equal(t, "OK", result)
-}
-
-// TestReplicationSync 测试同步过程
-// 需要主从配置环境，单机模式下跳过
-func TestReplicationSync(t *testing.T) {
-	t.Skip("需要主从配置环境 - 请使用 -replicaof 参数启动从节点")
-	setupTestServer(t)
-	defer teardownTestServer(t)
-
-	ctx := context.Background()
-
-	// 在主节点上添加数据
-	_ = testClient.Set(ctx, "sync_test_key", "sync_test_value", 0).Err()
-
-	// PSYNC - 尝试部分同步
-	result, err := testClient.Do(ctx, "PSYNC", "?", "-1").Result()
-	assert.NoError(t, err)
-
-	// 应该收到FULLRESYNC响应
-	arr, ok := result.([]interface{})
-	assert.True(t, ok)
-	assert.Equal(t, 3, len(arr))
-
-	// 第一个元素应该是replid
-	replid, ok := arr[0].(string)
-	assert.True(t, ok)
-	assert.Equal(t, "?", replid)
-
-	// 第二个元素应该是offset
-	offset, ok := arr[1].(int64)
-	assert.True(t, ok)
-	assert.Equal(t, int64(-1), offset)
-}
-
 // TestReplicationCommandProp 测试命令传播
 func TestReplicationCommandProp(t *testing.T) {
 	setupTestServer(t)
@@ -161,30 +101,6 @@ func TestReplicationMultipleSlaves(t *testing.T) {
 
 	// 检查connected_slaves字段
 	assert.True(t, contains(info, "connected_slaves:"))
-}
-
-// TestReplicationRoleInfo 测试角色详细信息
-// 需要主从配置环境，单机模式下跳过
-func TestReplicationRoleInfo(t *testing.T) {
-	t.Skip("需要主从配置环境")
-	setupTestServer(t)
-	defer teardownTestServer(t)
-
-	ctx := context.Background()
-
-	// ROLE - 获取详细角色信息
-	result, err := testClient.Do(ctx, "ROLE").Result()
-	assert.NoError(t, err)
-
-	arr, ok := result.([]interface{})
-	assert.True(t, ok)
-
-	// 主节点格式: [role, repl_offset, [slaves...]]
-	assert.Equal(t, "master", arr[0])
-
-	// 偏移量应该是数字
-	_, ok = arr[1].(int64)
-	assert.True(t, ok)
 }
 
 // TestMasterLinkStatus 测试主从连接状态
