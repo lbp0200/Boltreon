@@ -297,10 +297,47 @@ func TestRestore(t *testing.T) {
 	})
 
 	// 测试 ZSet 类型的 DUMP/RESTORE
-	// 注意：ZSet 的 DUMP/RESTORE 需要 ZRange 函数正常工作
-	// 由于 ZRange 存在预置问题，此测试暂时跳过
 	t.Run("ZSet", func(t *testing.T) {
-		t.Skip("ZSet DUMP/RESTORE skipped due to ZRange pre-existing issue")
+		// 添加有序集合成员
+		err := testClient.ZAdd(ctx, "zsettest", redis.Z{
+			Score:  1.0,
+			Member: "member1",
+		}, redis.Z{
+			Score:  2.0,
+			Member: "member2",
+		}, redis.Z{
+			Score:  3.0,
+			Member: "member3",
+		}).Err()
+		assert.NoError(t, err)
+
+		// 验证原始数据存在
+		originalMembers, err := testClient.ZRangeWithScores(ctx, "zsettest", 0, -1).Result()
+		assert.NoError(t, err)
+		assert.Equal(t, 3, len(originalMembers))
+
+		dumpResult, err := testClient.Do(ctx, "DUMP", "zsettest").Result()
+		assert.NoError(t, err)
+		dumpData := dumpResult.(string)
+		assert.True(t, len(dumpData) > 0)
+
+		err = testClient.Del(ctx, "zsettest").Err()
+		assert.NoError(t, err)
+
+		restoreResult, err := testClient.Do(ctx, "RESTORE", "zsetsaved", dumpData).Result()
+		assert.NoError(t, err)
+		assert.Equal(t, "OK", restoreResult)
+
+		// 验证恢复的数据
+		members, err := testClient.ZRangeWithScores(ctx, "zsetsaved", 0, -1).Result()
+		assert.NoError(t, err)
+		assert.Equal(t, 3, len(members))
+		assert.Equal(t, "member1", members[0].Member)
+		assert.Equal(t, float64(1.0), members[0].Score)
+		assert.Equal(t, "member2", members[1].Member)
+		assert.Equal(t, float64(2.0), members[1].Score)
+		assert.Equal(t, "member3", members[2].Member)
+		assert.Equal(t, float64(3.0), members[2].Score)
 	})
 
 	// 测试 REPLACE 选项

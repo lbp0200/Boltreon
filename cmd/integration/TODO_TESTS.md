@@ -1,8 +1,8 @@
 # 待修复的集成测试
 
 ## 测试状态统计
-- **通过**: 177 个测试
-- **跳过**: 1 个测试（ZSet DUMP/RESTORE 依赖 ZRange）
+- **通过**: 184 个测试
+- **跳过**: 0 个测试
 - **失败**: 0 个测试
 
 ---
@@ -14,12 +14,25 @@
 | 测试 | 状态 | 说明 |
 |------|------|------|
 | `TestDump` | ✅ 已通过 | DUMP 命令生成标准 RDB 格式 |
-| `TestRestore` | ✅ 已通过 | RESTORE 支持 STRING/LIST/HASH/SET 解析 |
+| `TestRestore` | ✅ 已通过 | RESTORE 支持 STRING/LIST/HASH/SET/ZSET 解析 |
 
 **修复内容：**
 1. `internal/store/base.go` - 重构 `Dump()` 函数：
    - 使用 RDB 辅助函数写入标准格式：`REDIS0009<expire><type><key><value><checksum>`
    - 支持 STRING、LIST、SET、HASH、ZSET 类型
+   - 添加 `WriteSortedSetKeyValue` 方法（`internal/replication/rdb.go`）
+
+2. `internal/store/base.go` - 重构 `Restore()` 函数：
+   - 解析 RDB 头部（REDIS0009）和版本
+   - 支持毫秒/秒精度过期时间
+   - 完整支持 STRING、LIST、SET、HASH、ZSET 类型恢复
+   - 添加 `restoreLegacy()` 保持向后兼容
+
+3. `internal/server/handler.go` - 更新 RESTORE 命令处理：
+   - 正确解析 TTL 参数（毫秒和 ABSTTL 模式）
+   - 处理二进制数据（[]byte/string 类型）
+
+4. `cmd/integration/key_advanced_test.go` - 添加 ZSet DUMP/RESTORE 测试用例
 
 2. `internal/store/base.go` - 重构 `Restore()` 函数：
    - 解析 RDB 头部（REDIS0009）和版本
@@ -79,16 +92,16 @@ go test -v ./cmd/integration/... -run "TestReplicationMasterSlave" -timeout 60s
 
 ## 待修复测试
 
-### Stream 消费者组测试
+### Stream 消费者组测试 ✅
 
-| 测试 | 文件 | 问题 |
+| 测试 | 文件 | 状态 |
 |------|------|------|
-| `TestXAck` | `stream_advanced_test.go` | 需要完整消费者组实现 |
-| `TestXGroupDelConsumer` | `stream_advanced_test.go` | 消费者未创建 |
-| `TestXClaim` | `stream_advanced_test.go` | XClaim 返回类型应为 []string |
-| `TestXPending` | `stream_advanced_test.go` | pending 列表为空 |
-| `TestXInfoGroups` | `stream_advanced_test.go` | 组信息缺少字段 |
-| `TestXRevRange` | `stream_advanced_test.go` | 返回空结果 |
+| `TestXAck` | `stream_advanced_test.go` | ✅ 已通过 |
+| `TestXGroupDelConsumer` | `stream_advanced_test.go` | ✅ 已通过 |
+| `TestXClaim` | `stream_advanced_test.go` | ✅ 已通过 |
+| `TestXPending` | `stream_advanced_test.go` | ✅ 已通过 |
+| `TestXInfoGroups` | `stream_advanced_test.go` | ✅ 已通过 |
+| `TestXRevRange` | `stream_advanced_test.go` | ✅ 已通过 |
 
 ### ZSet 高级命令测试
 
@@ -99,6 +112,7 @@ go test -v ./cmd/integration/... -run "TestReplicationMasterSlave" -timeout 60s
 | `TestZLex` | `sortedset_advanced_test.go` | ✅ 已通过 |
 | `TestZScan` | `sortedset_advanced_test.go` | ✅ 已通过 |
 | `TestZRangeByRankWithScores` | `sortedset_advanced_test.go` | ✅ 已通过 |
+| `TestRestore/ZSet` | `key_advanced_test.go` | ✅ 已通过 |
 
 ### 复制相关测试
 
@@ -133,7 +147,7 @@ go test -v ./cmd/integration/... -run "TestReplicationMasterSlave" -timeout 60s
 11. ✅ **OBJECT ENCODING** - 修复 nil 响应处理
 12. ✅ **XREADGROUP** - 修复 RESP 嵌套数组格式
 13. ✅ **XRANGE** - 修复 RESP 嵌套数组格式
-14. ✅ **Stream 消费者组** - XAck, XPending, XInfoGroups 测试通过
+14. ✅ **Stream 消费者组** - XAck, XPending, XInfoGroups, XClaim, XGroupDelConsumer, XRevRange 测试通过
 15. ✅ **XCLAIM 返回类型** - 返回正确格式
 16. ✅ **ZSet 高级命令** - ZRangeByScore, ZRemRangeByScore, ZLex, ZScan, ZRangeByRankWithScores 测试通过
 
@@ -145,7 +159,7 @@ go test -v ./cmd/integration/... -run "TestReplicationMasterSlave" -timeout 60s
 - 无
 
 ### 中优先级
-- 无（DUMP/RESTORE 已完成）
+- 无（所有测试已通过）
 
 ### 低优先级
-- 无（主从复制已通过自动化测试验证）
+- 无
