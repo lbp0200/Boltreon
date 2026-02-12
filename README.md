@@ -219,6 +219,56 @@ SENTINEL failover-timeout mymaster 180000
 SENTINEL parallel-syncs mymaster 1
 ```
 
+### Redis-Sentinel Compatibility | Redis-Sentinel 兼容性
+
+BoltDB can be monitored by external Redis Sentinel:
+
+| Command | Status | Notes |
+|---------|--------|-------|
+| `PING` | ✅ | Returns PONG |
+| `ROLE` | ✅ | Returns master/slave role |
+| `INFO replication` | ✅ | Returns full replication status |
+| `REPLCONF GETACK` | ✅ | Returns ACK offset |
+| `SENTINEL MASTER` | ✅ | Returns master status |
+| `故障检测` | ✅ | Detects master failure in ~30s |
+| `ODOWN 标记` | ✅ | Marks master as s_down, o_down |
+
+**Known Issues:**
+- `role-reported` may show `slave` instead of `master` in some cases
+
+---
+
+## Redis Interoperability | Redis 互操作性
+
+### Replication Test Results | 复制测试结果
+
+| Scenario | Status | Notes |
+|----------|--------|-------|
+| **BoltDB → Redis** | ✅ | Data sync works (SET, INCR, LPUSH, ZADD, HSET) |
+| **Redis → BoltDB** | ❌ | Not supported (BoltDB lacks SLAVEOF command) |
+| **Role Switching** | ✅ | SLAVEOF NO ONE / SLAVEOF work instantly |
+| **Data Isolation** | ✅ | Both instances maintain independent data |
+| **故障恢复** | ✅ | Redis SLAVEOF switch takes effect immediately |
+
+**Test Commands:**
+```bash
+# Start BoltDB as master on port 6380
+./boltDB --dir=./data --addr=:6380
+
+# Start Redis as slave on port 6379
+redis-server --port 6379 --dir=/tmp/redis_data
+redis-cli -p 6379 SLAVEOF 127.0.0.1 6380
+
+# Write to BoltDB, read from Redis
+redis-cli -p 6380 SET "test" "hello"
+redis-cli -p 6379 GET "test"  # Returns "hello"
+```
+
+### Known Limitations | 已知限制
+
+1. **RDB Format Incompatibility**: BoltDB and Redis use different RDB formats and cannot exchange RDB snapshot files directly
+2. **BoltDB SLAVEOF**: BoltDB does not implement the SLAVEOF command, so it cannot act as a replica of Redis
+
 ---
 
 ## Performance | 性能
