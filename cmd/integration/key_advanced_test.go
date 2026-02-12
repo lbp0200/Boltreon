@@ -133,11 +133,36 @@ func TestDump(t *testing.T) {
 }
 
 // TestRestore 测试 RESTORE 命令
-// TODO: RESTORE command has argument handling issues with go-redis, skipping for now
 func TestRestore(t *testing.T) {
 	setupTestServer(t)
 	defer teardownTestServer(t)
-	// Skipped - requires go-redis Do() handling investigation
+
+	ctx := context.Background()
+
+	// 先设置一个值
+	err := testClient.Set(ctx, "testkey", "testvalue", 0).Err()
+	assert.NoError(t, err)
+
+	// DUMP 导出
+	dumpResult, err := testClient.Do(ctx, "DUMP", "testkey").Result()
+	assert.NoError(t, err)
+	dumpData, ok := dumpResult.(string)
+	assert.True(t, ok)
+	assert.True(t, len(dumpData) > 0)
+
+	// 删除原键
+	err = testClient.Del(ctx, "testkey").Err()
+	assert.NoError(t, err)
+
+	// RESTORE 恢复（使用旧格式：key, serializedData）
+	restoreResult, err := testClient.Do(ctx, "RESTORE", "restoredkey", dumpData).Result()
+	assert.NoError(t, err)
+	assert.Equal(t, "OK", restoreResult)
+
+	// 验证恢复的值
+	value, err := testClient.Get(ctx, "restoredkey").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, "testvalue", value)
 }
 
 // TestSort 测试 SORT 命令
@@ -278,8 +303,11 @@ func TestObjectEncoding(t *testing.T) {
 	assert.True(t, len(encoding) > 0)
 
 	// OBJECT ENCODING - 不存在的键
+	// 注意：go-redis 将 nil 响应转换为错误 "redis: nil"，需要特殊处理
 	result, err = testClient.Do(ctx, "OBJECT", "ENCODING", "nonexistent").Result()
-	assert.NoError(t, err)
+	if err != nil {
+		assert.Equal(t, "redis: nil", err.Error())
+	}
 	assert.Nil(t, result)
 }
 

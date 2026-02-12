@@ -363,7 +363,7 @@ func (s *BotreonStore) XLen(key string) (int64, error) {
 		metaKey := streamKey(key)
 		item, err := txn.Get(metaKey)
 		if errors.Is(err, badger.ErrKeyNotFound) {
-			return fmt.Errorf("ERR no such key")
+			return nil
 		}
 		if err != nil {
 			return err
@@ -675,7 +675,7 @@ func (s *BotreonStore) XRange(key, start, stop string, count int64) ([]StreamEnt
 		// Parse range bounds
 		startTS, startSeq, _ := parseStreamID(start)
 		if start == "-" {
-			startTS = -1
+			startTS = math.MinInt64
 			startSeq = 0
 		}
 		stopTS, stopSeq, _ := parseStreamID(stop)
@@ -747,7 +747,7 @@ func (s *BotreonStore) XDel(key string, ids ...string) (int64, error) {
 
 		item, err := txn.Get(metaKey)
 		if errors.Is(err, badger.ErrKeyNotFound) {
-			return fmt.Errorf("ERR no such key")
+			return nil
 		}
 		if err != nil {
 			return err
@@ -848,7 +848,7 @@ func (s *BotreonStore) XInfo(key string) (*StreamInfo, error) {
 		metaKey := streamKey(key)
 		item, err := txn.Get(metaKey)
 		if errors.Is(err, badger.ErrKeyNotFound) {
-			return fmt.Errorf("ERR no such key")
+			return nil
 		}
 		if err != nil {
 			return err
@@ -901,7 +901,7 @@ func (s *BotreonStore) XTrim(key string, maxLen int64, minID string) (int64, err
 
 		item, err := txn.Get(metaKey)
 		if errors.Is(err, badger.ErrKeyNotFound) {
-			return fmt.Errorf("ERR no such key")
+			return nil
 		}
 		if err != nil {
 			return err
@@ -1016,12 +1016,13 @@ func (s *BotreonStore) XGroupCreate(key, group, startID string) error {
 }
 
 // XGroupDelConsumer removes a consumer from a group
-func (s *BotreonStore) XGroupDelConsumer(key, group, consumer string) error {
-	return s.db.Update(func(txn *badger.Txn) error {
+func (s *BotreonStore) XGroupDelConsumer(key, group, consumer string) (int64, error) {
+	var removed int64
+	err := s.db.Update(func(txn *badger.Txn) error {
 		groupKey := streamGroupDataKey(key, group)
 		item, err := txn.Get(groupKey)
 		if errors.Is(err, badger.ErrKeyNotFound) {
-			return fmt.Errorf("ERR no such key")
+			return nil
 		}
 		if err != nil {
 			return err
@@ -1034,6 +1035,17 @@ func (s *BotreonStore) XGroupDelConsumer(key, group, consumer string) error {
 			return err
 		}
 
+		// Count pending messages for this consumer
+		if groupData.Pending != nil {
+			for id, p := range groupData.Pending {
+				if p.Consumer == consumer {
+					delete(groupData.Pending, id)
+					removed++
+				}
+			}
+		}
+
+		// Delete consumer
 		delete(groupData.Consumers, consumer)
 		data, err := json.Marshal(groupData)
 		if err != nil {
@@ -1041,6 +1053,7 @@ func (s *BotreonStore) XGroupDelConsumer(key, group, consumer string) error {
 		}
 		return txn.Set(groupKey, data)
 	})
+	return removed, err
 }
 
 // XGroupDestroy destroys a consumer group
@@ -1057,7 +1070,7 @@ func (s *BotreonStore) XGroupSetID(key, group, id string) error {
 		groupKey := streamGroupDataKey(key, group)
 		item, err := txn.Get(groupKey)
 		if errors.Is(err, badger.ErrKeyNotFound) {
-			return fmt.Errorf("ERR no such key")
+			return nil
 		}
 		if err != nil {
 			return err
@@ -1083,13 +1096,15 @@ func (s *BotreonStore) XGroupSetID(key, group, id string) error {
 func (s *BotreonStore) XReadGroup(group, consumer string, count int64, block int64, keys ...string) ([]map[string][]StreamEntry, error) {
 	result := make([]map[string][]StreamEntry, 0)
 
-	err := s.db.View(func(txn *badger.Txn) error {
+	err := s.db.Update(func(txn *badger.Txn) error {
+		now := time.Now().UnixNano() / int64(time.Millisecond)
+
 		for _, key := range keys {
 			// Get group info
 			groupKey := streamGroupDataKey(key, group)
 			item, err := txn.Get(groupKey)
 			if errors.Is(err, badger.ErrKeyNotFound) {
-				return fmt.Errorf("ERR no such key")
+				return nil
 			}
 			if err != nil {
 				return err
@@ -1102,6 +1117,26 @@ func (s *BotreonStore) XReadGroup(group, consumer string, count int64, block int
 				return err
 			}
 
+			// Ensure consumers map exists
+			if groupData.Consumers == nil {
+				groupData.Consumers = make(map[string]*StreamConsumer)
+			}
+
+			// Update or add consumer
+			if _, exists := groupData.Consumers[consumer]; !exists {
+				groupData.Consumers[consumer] = &StreamConsumer{
+					Name:     consumer,
+					LastSeen: now,
+				}
+			} else {
+				groupData.Consumers[consumer].LastSeen = now
+			}
+
+			// Ensure pending map exists
+			if groupData.Pending == nil {
+				groupData.Pending = make(map[string]*StreamPendingEntry)
+			}
+
 			// Get entries after last delivered ID
 			entries := make([]StreamEntry, 0)
 			prefix := streamDataPrefix(key)
@@ -1109,6 +1144,7 @@ func (s *BotreonStore) XReadGroup(group, consumer string, count int64, block int
 			defer it.Close()
 
 			lastTS, lastSeq, _ := parseStreamID(groupData.LastDeliveredID)
+			var lastID string
 
 			for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
 				item := it.Item()
@@ -1133,9 +1169,35 @@ func (s *BotreonStore) XReadGroup(group, consumer string, count int64, block int
 					Sequence:  seq,
 				})
 
+				// Add to pending if not already pending
+				if _, pending := groupData.Pending[id]; !pending {
+					groupData.Pending[id] = &StreamPendingEntry{
+						ID:            id,
+						Consumer:      consumer,
+						DeliveryCount: 1,
+						LastDelivery:  now,
+					}
+				}
+
+				lastID = id
+
 				if count > 0 && int64(len(entries)) >= count {
 					break
 				}
+			}
+
+			// Update last delivered ID
+			if lastID != "" {
+				groupData.LastDeliveredID = lastID
+			}
+
+			// Save updated group data
+			data, err := json.Marshal(groupData)
+			if err != nil {
+				return err
+			}
+			if err := txn.Set(groupKey, data); err != nil {
+				return err
 			}
 
 			if len(entries) > 0 {
@@ -1156,7 +1218,7 @@ func (s *BotreonStore) XAck(key, group string, ids ...string) (int64, error) {
 		groupKey := streamGroupDataKey(key, group)
 		item, err := txn.Get(groupKey)
 		if errors.Is(err, badger.ErrKeyNotFound) {
-			return fmt.Errorf("ERR no such key")
+			return nil
 		}
 		if err != nil {
 			return err
@@ -1194,7 +1256,7 @@ func (s *BotreonStore) XPending(key, group string) ([]StreamPendingEntry, error)
 		groupKey := streamGroupDataKey(key, group)
 		item, err := txn.Get(groupKey)
 		if errors.Is(err, badger.ErrKeyNotFound) {
-			return fmt.Errorf("ERR no such key")
+			return nil
 		}
 		if err != nil {
 			return err
@@ -1217,14 +1279,14 @@ func (s *BotreonStore) XPending(key, group string) ([]StreamPendingEntry, error)
 }
 
 // XClaim claims pending messages
-func (s *BotreonStore) XClaim(key, group, consumer string, minIdleTime int64, ids ...string) (int64, error) {
-	var claimed int64
+func (s *BotreonStore) XClaim(key, group, consumer string, minIdleTime int64, ids ...string) ([]string, error) {
+	var claimed []string
 
 	err := s.db.Update(func(txn *badger.Txn) error {
 		groupKey := streamGroupDataKey(key, group)
 		item, err := txn.Get(groupKey)
 		if errors.Is(err, badger.ErrKeyNotFound) {
-			return fmt.Errorf("ERR no such key")
+			return nil
 		}
 		if err != nil {
 			return err
@@ -1250,7 +1312,7 @@ func (s *BotreonStore) XClaim(key, group, consumer string, minIdleTime int64, id
 				p.Consumer = consumer
 				p.LastDelivery = now
 				p.DeliveryCount++
-				claimed++
+				claimed = append(claimed, id)
 			}
 		}
 
@@ -1297,7 +1359,7 @@ func (s *BotreonStore) XInfoConsumers(key, group string) ([]*StreamConsumer, err
 		groupKey := streamGroupDataKey(key, group)
 		item, err := txn.Get(groupKey)
 		if errors.Is(err, badger.ErrKeyNotFound) {
-			return fmt.Errorf("ERR no such key")
+			return nil
 		}
 		if err != nil {
 			return err
@@ -1394,7 +1456,7 @@ func (s *BotreonStore) XAutoClaim(key, group, consumer string, minIdleTime int64
 		groupKey := streamGroupDataKey(key, group)
 		item, err := txn.Get(groupKey)
 		if errors.Is(err, badger.ErrKeyNotFound) {
-			return fmt.Errorf("ERR no such key")
+			return nil
 		}
 		if err != nil {
 			return err

@@ -236,9 +236,17 @@ func TestXReadGroup(t *testing.T) {
 	result, err := testClient.Do(ctx, "XREADGROUP", "GROUP", "mygroup", "consumer1", "COUNT", "1", "STREAMS", "readstream", ">").Result()
 	assert.NoError(t, err)
 
+	// Redis returns: [[streamKey, [[entryID, [field, value]]]]]
+	// Outer array length equals number of streams (1 in this case)
 	arr, ok := result.([]interface{})
 	assert.True(t, ok)
-	assert.Equal(t, 2, len(arr)) // [stream, [[entries]]]
+	assert.Equal(t, 1, len(arr)) // 1 stream
+
+	// Each stream element is [streamKey, [entries]]
+	streamArr, ok := arr[0].([]interface{})
+	assert.True(t, ok)
+	assert.Equal(t, 2, len(streamArr)) // [streamKey, entries]
+	assert.Equal(t, "readstream", streamArr[0])
 }
 
 // TestXClaim 测试 XCLAIM 命令

@@ -250,7 +250,7 @@ func (s *BotreonStore) ZAdd(zSetName string, members []ZSetMember) error {
 }
 
 // ZRangeByScore 获取分数范围内的成员
-func (s *BotreonStore) ZRangeByScore(zSetName string, minScore, maxScore float64, offset, count int) ([]ZSetMember, error) {
+func (s *BotreonStore) ZRangeByScore(zSetName string, minScore, maxScore float64, offset, count int, minExclusive, maxExclusive bool) ([]ZSetMember, error) {
 	var results []ZSetMember
 	err := s.db.View(func(txn *badger.Txn) error {
 		opts := badger.DefaultIteratorOptions
@@ -280,9 +280,22 @@ func (s *BotreonStore) ZRangeByScore(zSetName string, minScore, maxScore float64
 			}
 			score := decodeScore(scoreBytes)
 
-			if score > maxScore {
-				break
+			// Check max boundary
+			if maxExclusive {
+				if score >= maxScore {
+					break
+				}
+			} else {
+				if score > maxScore {
+					break
+				}
 			}
+
+			// Check min boundary
+			if minExclusive && score <= minScore {
+				continue
+			}
+
 			if current < offset {
 				current++
 				continue
@@ -838,9 +851,9 @@ func (s *BotreonStore) ZRevRange(zSetName string, start, stop int64) ([]*ZSetMem
 }
 
 // ZRevRangeByScore 实现 Redis ZREVRANGEBYSCORE 命令，返回有序集中指定分数区间内的成员，分数从高到低排序
-func (s *BotreonStore) ZRevRangeByScore(zSetName string, maxScore, minScore float64, offset, count int) ([]ZSetMember, error) {
+func (s *BotreonStore) ZRevRangeByScore(zSetName string, maxScore, minScore float64, offset, count int, minExclusive, maxExclusive bool) ([]ZSetMember, error) {
 	// 先获取正向范围
-	forwardResults, err := s.ZRangeByScore(zSetName, minScore, maxScore, 0, 0)
+	forwardResults, err := s.ZRangeByScore(zSetName, minScore, maxScore, 0, 0, minExclusive, maxExclusive)
 	if err != nil {
 		return nil, err
 	}
@@ -885,9 +898,9 @@ func (s *BotreonStore) ZRemRangeByRank(zSetName string, start, stop int64) (int6
 }
 
 // ZRemRangeByScore 实现 Redis ZREMRANGEBYSCORE 命令，移除有序集中指定分数区间的所有成员
-func (s *BotreonStore) ZRemRangeByScore(zSetName string, minScore, maxScore float64) (int64, error) {
+func (s *BotreonStore) ZRemRangeByScore(zSetName string, minScore, maxScore float64, minExclusive, maxExclusive bool) (int64, error) {
 	// 先获取范围内的成员
-	members, err := s.ZRangeByScore(zSetName, minScore, maxScore, 0, 0)
+	members, err := s.ZRangeByScore(zSetName, minScore, maxScore, 0, 0, minExclusive, maxExclusive)
 	if err != nil {
 		return 0, err
 	}

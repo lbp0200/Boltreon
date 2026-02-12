@@ -289,7 +289,7 @@ func TestZRangeByScore(t *testing.T) {
 	})
 
 	// 获取分数范围内的成员
-	members, err := store.ZRangeByScore(zSetName, 1.0, 3.0, 0, 0)
+	members, err := store.ZRangeByScore(zSetName, 1.0, 3.0, 0, 0, false, false)
 	assert.NoError(t, err)
 	assert.Equal(t, 3, len(members))
 	assert.Equal(t, "member1", members[0].Member)
@@ -297,7 +297,7 @@ func TestZRangeByScore(t *testing.T) {
 	assert.Equal(t, "member3", members[2].Member)
 
 	// 带offset和count
-	members, err = store.ZRangeByScore(zSetName, 1.0, 4.0, 1, 2)
+	members, err = store.ZRangeByScore(zSetName, 1.0, 4.0, 1, 2, false, false)
 	assert.NoError(t, err)
 	assert.Equal(t, 2, len(members))
 }
@@ -317,7 +317,7 @@ func TestZRevRangeByScore(t *testing.T) {
 	})
 
 	// 获取分数范围内的成员（反向）
-	members, err := store.ZRevRangeByScore(zSetName, 3.0, 1.0, 0, 0)
+	members, err := store.ZRevRangeByScore(zSetName, 3.0, 1.0, 0, 0, false, false)
 	assert.NoError(t, err)
 	assert.Equal(t, 3, len(members))
 	assert.Equal(t, "member3", members[0].Member) // 最高分数
@@ -399,7 +399,7 @@ func TestZRemRangeByScore(t *testing.T) {
 	})
 
 	// 删除分数范围内的成员
-	removed, err := store.ZRemRangeByScore(zSetName, 2.0, 3.0)
+	removed, err := store.ZRemRangeByScore(zSetName, 2.0, 3.0, false, false)
 	assert.NoError(t, err)
 	assert.Equal(t, int64(2), removed)
 
@@ -577,7 +577,7 @@ func TestSortedSetOperations(t *testing.T) {
 	assert.Equal(t, 3, len(members))
 
 	// 分数范围查询
-	scoreMembers, _ := store.ZRangeByScore(zSetName, 1.0, 3.0, 0, 0)
+	scoreMembers, _ := store.ZRangeByScore(zSetName, 1.0, 3.0, 0, 0, false, false)
 	assert.True(t, len(scoreMembers) > 0)
 
 	// 删除成员

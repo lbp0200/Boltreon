@@ -224,7 +224,9 @@ func TestTCPIntegration(t *testing.T) {
 			args:    []string{"nonexistent"},
 			validate: func(t *testing.T, resp proto.RESP) {
 				// GET nonexistent should return nil bulk string
-				assert.Nil(t, resp)
+				bulk, ok := resp.(*proto.BulkString)
+				assert.True(t, ok)
+				assert.Nil(t, *bulk) // Check that the BulkString data is nil
 			},
 		},
 		{

@@ -36,6 +36,7 @@ type Handler struct {
 // ClientInfo 客户端连接信息
 type ClientInfo struct {
 	ID       int64               // 客户端 ID
+	Name     string              // 客户端名称
 	Addr     string              // 客户端地址
 	FD       int                 // 文件描述符
 	Age      int64               // 连接时长（秒）
@@ -428,10 +429,12 @@ func (h *Handler) executeCommand(cmd string, args [][]byte, remoteAddr string) p
 			// 返回当前客户端列表（简化实现）
 			return proto.NewBulkString([]byte("id=1 addr=127.0.0.1:12345 fd=6 name= age=0 idle=0 flags=N db=0 sub=0 psub=0 multi=-1 cmd=client events=r oFlags= keys=0"))
 		case "GETNAME":
-			if h.clientInfo != nil && h.clientInfo.ID != 0 {
-				return proto.NewBulkString([]byte(fmt.Sprintf("client-%d", h.clientInfo.ID)))
+			if h.clientInfo != nil && h.clientInfo.Name != "" {
+				return proto.NewBulkString([]byte(h.clientInfo.Name))
 			}
-			return proto.NewBulkString(nil)
+			// 返回 nil BulkString（go-redis 会将其作为 nil 返回）
+			nilResp := proto.NewBulkString(nil)
+			return nilResp
 		case "SETNAME":
 			if len(args) < 2 {
 				return proto.NewError("ERR wrong number of arguments for 'CLIENT SETNAME' command")
@@ -441,7 +444,7 @@ func (h *Handler) executeCommand(cmd string, args [][]byte, remoteAddr string) p
 			if h.clientInfo == nil {
 				h.clientInfo = &ClientInfo{}
 			}
-			_ = name // 名称已设置
+			h.clientInfo.Name = name
 			return proto.OK
 		case "ID":
 			if h.clientInfo != nil {
@@ -454,15 +457,62 @@ func (h *Handler) executeCommand(cmd string, args [][]byte, remoteAddr string) p
 			}
 			addr := string(args[1])
 			// 简化实现：检查地址格式，但不真正关闭连接
+			// 由于无法真正关闭连接，总是返回0（连接不存在）
 			if addr == "" {
 				return proto.NewError("ERR Invalid address")
 			}
-			return proto.NewInteger(1)
+			// 返回0表示没有杀死任何连接（简化实现）
+			return proto.NewInteger(0)
 		case "PAUSE":
 			// 暂停客户端（简化实现：空操作）
 			return proto.OK
 		case "UNPAUSE":
 			// 取消暂停（简化实现：空操作）
+			return proto.OK
+		case "INFO":
+			// 返回客户端连接信息
+			addr := "127.0.0.1:6379"
+			clientID := int64(0)
+			fd := 0
+			clientName := ""
+			if h.clientInfo != nil {
+				if h.clientInfo.Addr != "" {
+					addr = h.clientInfo.Addr
+				}
+				clientID = h.clientInfo.ID
+				fd = h.clientInfo.FD
+				clientName = h.clientInfo.Name
+			}
+			clientAge := "0"
+			idleTime := "0"
+			flags := "N"
+			db := "0"
+			sub := "0"
+			psub := "0"
+			multi := "-1"
+			keys := "0"
+			info := fmt.Sprintf("id=%d addr=%s fd=%d name=%s age=%s idle=%s flags=%s db=%s sub=%s psub=%s multi=%s cmd=client events=r oFlags= keys=%s",
+				clientID, addr, fd, clientName, clientAge, idleTime, flags, db, sub, psub, multi, keys)
+			return proto.NewBulkString([]byte(info))
+		case "NOEVICT":
+			if len(args) < 2 {
+				return proto.NewError("ERR wrong number of arguments for 'CLIENT NOEVICT' command")
+			}
+			mode := strings.ToUpper(string(args[1]))
+			if mode != "ON" && mode != "OFF" {
+				return proto.NewError("ERR syntax error")
+			}
+			// noevict 模式（简化实现）
+			return proto.OK
+		case "TRACKING":
+			if len(args) < 2 {
+				return proto.NewError("ERR wrong number of arguments for 'CLIENT TRACKING' command")
+			}
+			mode := strings.ToUpper(string(args[1]))
+			if mode != "ON" && mode != "OFF" {
+				return proto.NewError("ERR syntax error")
+			}
+			// tracking 模式（简化实现）
 			return proto.OK
 		default:
 			return proto.NewError("ERR syntax error")
@@ -1088,9 +1138,39 @@ func (h *Handler) executeCommand(cmd string, args [][]byte, remoteAddr string) p
 			return proto.NewError("ERR wrong number of arguments for 'RESTORE' command")
 		}
 		key := string(args[0])
+		// 解析 TTL（毫秒）
+		if len(args) > 2 {
+			ttlArg := string(args[1])
+			// 检查是否是 TTL（数字）而不是序列化数据
+			if _, err := strconv.ParseInt(ttlArg, 10, 64); err == nil {
+				// 参数位置偏移：key, ttl, serializedData, [REPLACE|ABSTTL]
+				if len(args) < 4 {
+					return proto.NewError("ERR wrong number of arguments for 'RESTORE' command")
+				}
+				// 序列化数据现在在 args[2]
+				// 检查选项
+				replace := false
+				absttl := false
+				for i := 3; i < len(args); i++ {
+					upper := strings.ToUpper(string(args[i]))
+					if upper == "REPLACE" {
+						replace = true
+					} else if upper == "ABSTTL" {
+						absttl = true
+					}
+				}
+				// 注意：TTL 功能在 BoltDB 中简化处理，仅记录
+				_ = absttl
+				err := h.Db.Restore(key, args[2], replace)
+				if err != nil {
+					return proto.NewError(fmt.Sprintf("ERR %v", err))
+				}
+				return proto.OK
+			}
+		}
+		// 旧格式：key, serializedData, [REPLACE]
 		serializedData := args[1]
 		replace := false
-		// 检查是否有 REPLACE 选项
 		for i := 2; i < len(args); i++ {
 			if strings.ToUpper(string(args[i])) == "REPLACE" {
 				replace = true
@@ -1136,8 +1216,8 @@ func (h *Handler) executeCommand(cmd string, args [][]byte, remoteAddr string) p
 			}
 			return proto.NewInteger(idletime)
 		case "FREQ":
-			// Freq not supported, return empty string
-			return proto.NewBulkString(nil)
+			// BoltDB doesn't support LFU, return 0
+			return proto.NewInteger(0)
 		default:
 			return proto.NewError("ERR syntax error")
 		}
@@ -2449,12 +2529,12 @@ func (h *Handler) executeCommand(cmd string, args [][]byte, remoteAddr string) p
 		minStr := string(args[1])
 		maxStr := string(args[2])
 
-		// 解析分数范围
-		minScore, err := parseScore(minStr)
+		// 解析分数范围（包含排除标志）
+		minScore, minExclusive, err := parseScoreExclusive(minStr)
 		if err != nil {
 			return proto.NewError("ERR min or max is not a float")
 		}
-		maxScore, err := parseScore(maxStr)
+		maxScore, maxExclusive, err := parseScoreExclusive(maxStr)
 		if err != nil {
 			return proto.NewError("ERR min or max is not a float")
 		}
@@ -2487,7 +2567,7 @@ func (h *Handler) executeCommand(cmd string, args [][]byte, remoteAddr string) p
 			}
 		}
 
-		members, err := h.Db.ZRangeByScore(key, minScore, maxScore, offset, count)
+		members, err := h.Db.ZRangeByScore(key, minScore, maxScore, offset, count, minExclusive, maxExclusive)
 		if err != nil {
 			return &proto.Array{Args: [][]byte{}}
 		}
@@ -2513,12 +2593,12 @@ func (h *Handler) executeCommand(cmd string, args [][]byte, remoteAddr string) p
 		maxStr := string(args[1])
 		minStr := string(args[2])
 
-		// 解析分数范围
-		maxScore, err := parseScore(maxStr)
+		// 解析分数范围（包含排除标志）
+		maxScore, maxExclusive, err := parseScoreExclusive(maxStr)
 		if err != nil {
 			return proto.NewError("ERR min or max is not a float")
 		}
-		minScore, err := parseScore(minStr)
+		minScore, minExclusive, err := parseScoreExclusive(minStr)
 		if err != nil {
 			return proto.NewError("ERR min or max is not a float")
 		}
@@ -2551,7 +2631,7 @@ func (h *Handler) executeCommand(cmd string, args [][]byte, remoteAddr string) p
 			}
 		}
 
-		members, err := h.Db.ZRevRangeByScore(key, maxScore, minScore, offset, count)
+		members, err := h.Db.ZRevRangeByScore(key, maxScore, minScore, offset, count, minExclusive, maxExclusive)
 		if err != nil {
 			return &proto.Array{Args: [][]byte{}}
 		}
@@ -2645,15 +2725,15 @@ func (h *Handler) executeCommand(cmd string, args [][]byte, remoteAddr string) p
 			return proto.NewError("ERR wrong number of arguments for 'ZREMRANGEBYSCORE' command")
 		}
 		key := string(args[0])
-		min, err := strconv.ParseFloat(string(args[1]), 64)
+		min, minExclusive, err := parseScoreExclusive(string(args[1]))
 		if err != nil {
 			return proto.NewError("ERR value is not a valid float")
 		}
-		max, err := strconv.ParseFloat(string(args[2]), 64)
+		max, maxExclusive, err := parseScoreExclusive(string(args[2]))
 		if err != nil {
 			return proto.NewError("ERR value is not a valid float")
 		}
-		count, err := h.Db.ZRemRangeByScore(key, min, max)
+		count, err := h.Db.ZRemRangeByScore(key, min, max, minExclusive, maxExclusive)
 		if err != nil {
 			return proto.NewError(fmt.Sprintf("ERR %v", err))
 		}
@@ -3008,13 +3088,17 @@ func (h *Handler) executeCommand(cmd string, args [][]byte, remoteAddr string) p
 			return proto.NewError(fmt.Sprintf("ERR %v", err))
 		}
 		// 返回格式: [cursor, [member1, score1, member2, score2, ...]]
-		response := make([][]byte, 0, 2+len(result.Members)*2)
-		response = append(response, []byte(strconv.FormatUint(result.Cursor, 10)))
-		for _, m := range result.Members {
-			response = append(response, []byte(m.Member))
-			response = append(response, []byte(fmt.Sprintf("%.10g", m.Score)))
+		membersArray := make([][]byte, len(result.Members)*2)
+		for i, m := range result.Members {
+			membersArray[i*2] = []byte(m.Member)
+			membersArray[i*2+1] = []byte(fmt.Sprintf("%.10g", m.Score))
 		}
-		return &proto.Array{Args: response}
+		return &proto.NestedArray{
+			Elems: []proto.RESP{
+				proto.Integer(result.Cursor),
+				&proto.Array{Args: membersArray},
+			},
+		}
 
 	// ASKING 命令（用于集群槽迁移）
 	case "ASKING":
@@ -3107,7 +3191,15 @@ func (h *Handler) executeCommand(cmd string, args [][]byte, remoteAddr string) p
 				return proto.NewError("ERR wrong number of arguments for 'CONFIG GET' command")
 			}
 		case "SET":
-			// CONFIG SET 返回 OK（简化实现，不实际设置）
+			// CONFIG SET <key> <value>
+			if len(args) < 3 {
+				return proto.NewError("ERR wrong number of arguments for 'CONFIG SET' command")
+			}
+			// 简化实现：仅验证参数存在，返回 OK
+			return proto.OK
+		case "REWRITE":
+			// CONFIG REWRITE - 简化实现，将配置重写到配置文件
+			// 由于 BoltDB 使用动态配置，不写入文件
 			return proto.OK
 		default:
 			return proto.NewError(fmt.Sprintf("ERR unknown subcommand '%s'", subcommand))
@@ -3362,6 +3454,25 @@ func (h *Handler) executeCommand(cmd string, args [][]byte, remoteAddr string) p
 			return proto.NewError("ERR unknown subcommand for 'MEMORY'")
 		}
 
+	// ==================== MODULE ====================
+	case "MODULE":
+		if len(args) < 1 {
+			return proto.NewError("ERR wrong number of arguments for 'MODULE' command")
+		}
+		subCommand := strings.ToUpper(string(args[0]))
+		switch subCommand {
+		case "LIST":
+			// Return empty array - no modules loaded
+			return &proto.Array{Args: [][]byte{}}
+		case "HELP":
+			return &proto.Array{Args: [][]byte{
+				[]byte("MODULE LIST - list loaded modules"),
+				[]byte("MODULE HELP - shows this help message"),
+			}}
+		default:
+			return proto.NewError("ERR unknown subcommand for 'MODULE'")
+		}
+
 	// ==================== LOLWUT ====================
 	case "LOLWUT":
 		// LOLWUT [VERSION version] - Redis version sanity check
@@ -3494,7 +3605,7 @@ func (h *Handler) executeCommand(cmd string, args [][]byte, remoteAddr string) p
 				members[i] = store.ZSetMember{Member: m, Score: 0}
 			}
 		} else if byScore {
-			members, err = h.Db.ZRangeByScore(srcKey, minScore, maxScore, int(limitOffset), int(limitCount))
+			members, err = h.Db.ZRangeByScore(srcKey, minScore, maxScore, int(limitOffset), int(limitCount), false, false)
 			if err != nil {
 				return proto.NewError(fmt.Sprintf("ERR %v", err))
 			}
@@ -3609,18 +3720,30 @@ func (h *Handler) executeCommand(cmd string, args [][]byte, remoteAddr string) p
 		if h.PubSub == nil {
 			return proto.NewError("ERR pubsub not enabled")
 		}
-		// 简化实现
+		// 返回取消订阅确认
+		channel := ""
+		if len(args) >= 1 {
+			channel = string(args[0])
+		}
 		return &proto.Array{Args: [][]byte{
 			[]byte("unsubscribe"),
+			[]byte(channel),
+			[]byte("0"),
 		}}
 
 	case "PUNSUBSCRIBE":
 		if h.PubSub == nil {
 			return proto.NewError("ERR pubsub not enabled")
 		}
-		// 简化实现
+		// 返回取消模式订阅确认
+		pattern := ""
+		if len(args) >= 1 {
+			pattern = string(args[0])
+		}
 		return &proto.Array{Args: [][]byte{
 			[]byte("punsubscribe"),
+			[]byte(pattern),
+			[]byte("0"),
 		}}
 
 	case "PUBSUB":
@@ -4243,17 +4366,30 @@ func (h *Handler) executeCommand(cmd string, args [][]byte, remoteAddr string) p
 			return proto.NewError(fmt.Sprintf("ERR %v", err))
 		}
 
-		response := make([][]byte, 0)
-		for _, entry := range entries {
-			response = append(response, []byte(entry.ID))
-			fieldArray := make([][]byte, 0)
-			for k, v := range entry.Fields {
-				fieldArray = append(fieldArray, []byte(k))
-				fieldArray = append(fieldArray, []byte(v))
-			}
-			response = append(response, fieldArray...)
+		// XRANGE returns [[entryID, [field, value, ...]], ...]
+		// go-redis parses nested arrays as flat when structure is [id, [fields...]]
+		// Format expected by test: [[id1, field1, value1], [id2, field2, value2]]
+		if len(entries) == 0 {
+			return &proto.Array{Args: [][]byte{}}
 		}
-		return &proto.Array{Args: response}
+		var resultElems []proto.RESP
+		for _, entry := range entries {
+			var fieldElems []proto.RESP
+			for k, v := range entry.Fields {
+				bsK := proto.BulkString(k)
+				bsV := proto.BulkString(v)
+				fieldElems = append(fieldElems, &bsK, &bsV)
+			}
+			bsID := proto.BulkString(entry.ID)
+			// Entry: [id, [field, value, ...]]
+			resultElems = append(resultElems, &proto.NestedArray{
+				Elems: []proto.RESP{
+					&bsID,
+					&proto.NestedArray{Elems: fieldElems},
+				},
+			})
+		}
+		return &proto.NestedArray{Elems: resultElems}
 
 	// ==================== XREVRANGE ====================
 	case "XREVRANGE":
@@ -4261,8 +4397,8 @@ func (h *Handler) executeCommand(cmd string, args [][]byte, remoteAddr string) p
 			return proto.NewError("ERR wrong number of arguments for 'XREVRANGE' command")
 		}
 		key := string(args[0])
-		start := string(args[2])
-		stop := string(args[1])
+		start := string(args[1])
+		stop := string(args[2])
 		count := int64(0)
 
 		// Parse COUNT option
@@ -4285,17 +4421,27 @@ func (h *Handler) executeCommand(cmd string, args [][]byte, remoteAddr string) p
 			return proto.NewError(fmt.Sprintf("ERR %v", err))
 		}
 
-		response := make([][]byte, 0)
-		for _, entry := range entries {
-			response = append(response, []byte(entry.ID))
-			fieldArray := make([][]byte, 0)
-			for k, v := range entry.Fields {
-				fieldArray = append(fieldArray, []byte(k))
-				fieldArray = append(fieldArray, []byte(v))
-			}
-			response = append(response, fieldArray...)
+		// XREVRANGE returns [[entryID, [field, value, ...]], ...] (reverse order)
+		if len(entries) == 0 {
+			return &proto.Array{Args: [][]byte{}}
 		}
-		return &proto.Array{Args: response}
+		var resultElems []proto.RESP
+		for _, entry := range entries {
+			var fieldElems []proto.RESP
+			for k, v := range entry.Fields {
+				bsK := proto.BulkString(k)
+				bsV := proto.BulkString(v)
+				fieldElems = append(fieldElems, &bsK, &bsV)
+			}
+			bsID := proto.BulkString(entry.ID)
+			resultElems = append(resultElems, &proto.NestedArray{
+				Elems: []proto.RESP{
+					&bsID,
+					&proto.NestedArray{Elems: fieldElems},
+				},
+			})
+		}
+		return &proto.NestedArray{Elems: resultElems}
 
 	// ==================== XDEL ====================
 	case "XDEL":
@@ -4381,11 +4527,11 @@ func (h *Handler) executeCommand(cmd string, args [][]byte, remoteAddr string) p
 			key := string(args[1])
 			group := string(args[2])
 			consumer := string(args[3])
-			err := h.Db.XGroupDelConsumer(key, group, consumer)
+			removed, err := h.Db.XGroupDelConsumer(key, group, consumer)
 			if err != nil {
 				return proto.NewError(fmt.Sprintf("ERR %v", err))
 			}
-			return proto.NewInteger(1)
+			return proto.NewInteger(removed)
 		default:
 			return proto.NewError("ERR syntax error")
 		}
@@ -4502,28 +4648,42 @@ func (h *Handler) executeCommand(cmd string, args [][]byte, remoteAddr string) p
 			return proto.NewError(fmt.Sprintf("ERR %v", err))
 		}
 
-		// Format response
-		var response [][]byte
+		// Format response - XREADGROUP returns [[stream, [[entry1], [entry2], ...]], ...]
+		// Test expects format: [streamKey, [[entries]]]
+		// This produces nested arrays: [key, [entries]]
+		var response []proto.RESP
 		for _, streamMap := range results {
 			for streamKey, entries := range streamMap {
-				response = append(response, []byte(streamKey))
-				entryArray := make([][]byte, 0)
+				// Build entries array for this stream
+				var entryArrayElems []proto.RESP
 				for _, entry := range entries {
-					entryArray = append(entryArray, []byte(entry.ID))
-					fieldArray := make([][]byte, 0)
+					// Build field array for this entry: [id, [field1, value1, ...]]
+					var fieldElems []proto.RESP
 					for k, v := range entry.Fields {
-						fieldArray = append(fieldArray, []byte(k))
-						fieldArray = append(fieldArray, []byte(v))
+						bsK := proto.BulkString(k)
+						bsV := proto.BulkString(v)
+						fieldElems = append(fieldElems, &bsK, &bsV)
 					}
-					entryArray = append(entryArray, fieldArray...)
+					// Entry is [id, [fields...]]
+					bsID := proto.BulkString(entry.ID)
+					entryArrayElems = append(entryArrayElems, &proto.NestedArray{
+						Elems: []proto.RESP{&bsID, &proto.NestedArray{Elems: fieldElems}},
+					})
 				}
-				response = append(response, entryArray...)
+				// Stream result is [streamKey, entriesArray]
+				bsKey := proto.BulkString(streamKey)
+				response = append(response, &proto.NestedArray{
+					Elems: []proto.RESP{
+						&bsKey,
+						&proto.NestedArray{Elems: entryArrayElems},
+					},
+				})
 			}
 		}
 		if len(response) == 0 {
 			return proto.NewBulkString(nil)
 		}
-		return &proto.Array{Args: response}
+		return &proto.NestedArray{Elems: response}
 
 	// ==================== XCLAIM ====================
 	case "XCLAIM":
@@ -4545,7 +4705,12 @@ func (h *Handler) executeCommand(cmd string, args [][]byte, remoteAddr string) p
 		if err != nil {
 			return proto.NewError(fmt.Sprintf("ERR %v", err))
 		}
-		return proto.NewInteger(claimed)
+		// XCLAIM returns array of message IDs
+		result := make([][]byte, len(claimed))
+		for i, id := range claimed {
+			result[i] = []byte(id)
+		}
+		return &proto.Array{Args: result}
 
 	// ==================== XAUTOCLAIM ====================
 	case "XAUTOCLAIM":
@@ -4622,13 +4787,40 @@ func (h *Handler) executeCommand(cmd string, args [][]byte, remoteAddr string) p
 		if err != nil {
 			return proto.NewError(fmt.Sprintf("ERR %v", err))
 		}
-		response := make([][]byte, 0)
+		// Redis XPENDING format: [pending_count, min_id, max_id, [[id, consumer, delivery_count, last_delivery_time], ...]]
+		response := make([]proto.RESP, 0)
+
+		// Count pending entries
+		count := len(entries)
+		response = append(response, proto.Integer(count))
+
+		// Find min and max IDs
+		var minID, maxID string
 		for _, e := range entries {
-			response = append(response, []byte(e.ID))
-			response = append(response, []byte(e.Consumer))
-			response = append(response, []byte(strconv.FormatInt(e.DeliveryCount, 10)))
+			if minID == "" || e.ID < minID {
+				minID = e.ID
+			}
+			if maxID == "" || e.ID > maxID {
+				maxID = e.ID
+			}
 		}
-		return &proto.Array{Args: response}
+		response = append(response, proto.NewBulkString([]byte(minID)))
+		response = append(response, proto.NewBulkString([]byte(maxID)))
+
+		// Build entries array
+		var entriesArray []proto.RESP
+		for _, e := range entries {
+			entryArray := []proto.RESP{
+				proto.NewBulkString([]byte(e.ID)),
+				proto.NewBulkString([]byte(e.Consumer)),
+				proto.Integer(e.DeliveryCount),
+				proto.Integer(e.LastDelivery),
+			}
+			entriesArray = append(entriesArray, &proto.NestedArray{Elems: entryArray})
+		}
+		response = append(response, &proto.NestedArray{Elems: entriesArray})
+
+		return &proto.NestedArray{Elems: response}
 
 	// ==================== XINFO ====================
 	case "XINFO":
@@ -4685,16 +4877,20 @@ func (h *Handler) executeCommand(cmd string, args [][]byte, remoteAddr string) p
 			if err != nil {
 				return proto.NewError(fmt.Sprintf("ERR %v", err))
 			}
-			response := make([][]byte, 0)
+			// Return array of groups, each group is a nested array of [key, value, ...]
+			var response []proto.RESP
 			for _, g := range groups {
-				response = append(response, []byte("name"))
-				response = append(response, []byte(g.Name))
-				response = append(response, []byte("consumers"))
-				response = append(response, []byte(strconv.Itoa(len(g.Consumers))))
-				response = append(response, []byte("pending"))
-				response = append(response, []byte(strconv.Itoa(len(g.Pending))))
+				groupInfo := []proto.RESP{
+					proto.NewBulkString([]byte("name")),
+					proto.NewBulkString([]byte(g.Name)),
+					proto.NewBulkString([]byte("consumers")),
+					proto.NewBulkString([]byte(strconv.Itoa(len(g.Consumers)))),
+					proto.NewBulkString([]byte("pending")),
+					proto.NewBulkString([]byte(strconv.Itoa(len(g.Pending)))),
+				}
+				response = append(response, &proto.NestedArray{Elems: groupInfo})
 			}
-			return &proto.Array{Args: response}
+			return &proto.NestedArray{Elems: response}
 		case "CONSUMERS":
 			if len(args) < 3 {
 				return proto.NewError("ERR wrong number of arguments for 'XINFO CONSUMERS' command")
@@ -4725,6 +4921,7 @@ func (h *Handler) executeCommand(cmd string, args [][]byte, remoteAddr string) p
 		key := string(args[0])
 		var maxLen int64 = 0
 		var minID string
+		approximate := false
 
 		// Parse options
 		i := 1
@@ -4735,20 +4932,54 @@ func (h *Handler) executeCommand(cmd string, args [][]byte, remoteAddr string) p
 				if i+1 >= len(args) {
 					return proto.NewError("ERR syntax error")
 				}
-				maxlen, err := strconv.ParseInt(string(args[i+1]), 10, 64)
-				if err != nil {
-					return proto.NewError("ERR value is not an integer")
+				// Handle ~ approximation option
+				nextArg := strings.ToUpper(string(args[i+1]))
+				if nextArg == "~" {
+					approximate = true
+					if i+2 >= len(args) {
+						return proto.NewError("ERR syntax error")
+					}
+					maxlen, err := strconv.ParseInt(string(args[i+2]), 10, 64)
+					if err != nil {
+						return proto.NewError("ERR value is not an integer")
+					}
+					maxLen = maxlen
+					i += 3
+				} else {
+					maxlen, err := strconv.ParseInt(string(args[i+1]), 10, 64)
+					if err != nil {
+						return proto.NewError("ERR value is not an integer")
+					}
+					maxLen = maxlen
+					i += 2
 				}
-				maxLen = maxlen
-				i += 2
 			case "MINID":
 				if i+1 >= len(args) {
 					return proto.NewError("ERR syntax error")
 				}
 				minID = string(args[i+1])
 				i += 2
+			case "~":
+				// ~ can come before MAXLEN with its value
+				// e.g., XTRIM key ~ count (defaults to MAXLEN)
+				_ = approximate
+				if i+1 >= len(args) {
+					return proto.NewError("ERR syntax error")
+				}
+				maxlen, err := strconv.ParseInt(string(args[i+1]), 10, 64)
+				if err != nil {
+					return proto.NewError("ERR value is not an integer")
+				}
+				maxLen = maxlen
+				i += 2
 			default:
-				return proto.NewError(fmt.Sprintf("ERR syntax error, unknown option %s", opt))
+				// Try to parse as a number (shorthand for MAXLEN)
+				if _, err := strconv.ParseInt(opt, 10, 64); err == nil {
+					maxLen, _ = strconv.ParseInt(opt, 10, 64)
+					i++
+				} else {
+					return proto.NewError(fmt.Sprintf("ERR syntax error, unknown option %s", opt))
+				}
 			}
 		}
 
@@ -4771,6 +5002,7 @@ func (h *Handler) executeCommand(cmd string, args [][]byte, remoteAddr string) p
 		var asc bool = true
 		var alpha bool
 		var destKey string
+		var byPattern string
 
 		i := 1
 		for i < len(args) {
@@ -4780,7 +5012,7 @@ func (h *Handler) executeCommand(cmd string, args [][]byte, remoteAddr string) p
 				if i+1 >= len(args) {
 					return proto.NewError("ERR syntax error")
 				}
-				// byPattern = string(args[i+1]) // Not implemented yet
+				byPattern = string(args[i+1])
 				i += 2
 			case "LIMIT":
 				if i+2 >= len(args) {
@@ -4853,6 +5085,27 @@ func (h *Handler) executeCommand(cmd string, args [][]byte, remoteAddr string) p
 			}
 		default:
 			return proto.NewError("ERR Operation against a key holding the wrong kind of value")
+		}
+
+		// Apply BY pattern - get weights from external keys
+		if byPattern != "" && len(values) > 0 {
+			weights := make([]float64, len(values))
+			for idx, val := range values {
+				targetKey := strings.Replace(byPattern, "*", val, 1)
+				weightVal, _ := h.Db.Get(targetKey)
+				if weightVal != "" {
+					if f, err := strconv.ParseFloat(weightVal, 64); err == nil {
+						weights[idx] = f
+					} else {
+						weights[idx] = float64(idx)
+					}
+				} else {
+					weights[idx] = float64(idx)
+				}
+			}
+			scores = weights
+			// When using BY, sort by scores (numeric)
+			alpha = false
 		}
 
 		// Sort values
@@ -4933,7 +5186,7 @@ func (h *Handler) executeCommand(cmd string, args [][]byte, remoteAddr string) p
 				if idx == 0 {
 					_, _ = h.Db.Del(destKey)
 				}
-				_, _ = h.Db.LPush(destKey, v)
+				_, _ = h.Db.RPush(destKey, v)
 			}
 			return proto.NewInteger(int64(len(values)))
 		}

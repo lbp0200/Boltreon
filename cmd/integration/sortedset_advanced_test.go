@@ -32,7 +32,7 @@ func TestZRangeByScore(t *testing.T) {
 		Max: "(25",
 	}).Result()
 	assert.NoError(t, err)
-	assert.Equal(t, []string{}, members)
+	assert.Equal(t, []string{"b"}, members) // exclusive (10, 25) returns only b (score 20)
 
 	// ZRANGEBYSCORE - 负无穷到某值
 	members, err = testClient.ZRangeByScore(ctx, "zrangescore", &redis.ZRangeBy{
@@ -194,7 +194,12 @@ func TestZLex(t *testing.T) {
 
 	arr, ok := result.([]interface{})
 	assert.True(t, ok)
-	assert.Equal(t, []string{"b", "c"}, arr)
+	// Convert []interface{} to []string
+	strArr := make([]string, len(arr))
+	for i, v := range arr {
+		strArr[i] = v.(string)
+	}
+	assert.Equal(t, []string{"b", "c"}, strArr)
 
 	// ZRANGEBYLEX - 开区间
 	result, err = testClient.Do(ctx, "ZRANGEBYLEX", "zlex", "(b", "(d").Result()
@@ -202,7 +207,11 @@ func TestZLex(t *testing.T) {
 
 	arr, ok = result.([]interface{})
 	assert.True(t, ok)
-	assert.Equal(t, []string{"c"}, arr)
+	strArr = make([]string, len(arr))
+	for i, v := range arr {
+		strArr[i] = v.(string)
+	}
+	assert.Equal(t, []string{"c"}, strArr)
 }
 
 // TestZRevRangeByLex 测试 ZREVRANGEBYLEX 命令
@@ -223,6 +232,12 @@ func TestZRevRangeByLex(t *testing.T) {
 	assert.True(t, ok)
 	// 逆序应该返回 d, c, b
 	assert.Equal(t, 3, len(arr))
+	// Verify values
+	strArr := make([]string, len(arr))
+	for i, v := range arr {
+		strArr[i] = v.(string)
+	}
+	assert.Equal(t, []string{"d", "c", "b"}, strArr)
 }
 
 // TestZRemRangeByLex 测试 ZREMRANGEBYLEX 命令
@@ -326,7 +341,7 @@ func TestZRangeByRankWithScores(t *testing.T) {
 	// [member1, score1, member2, score2]
 	assert.Equal(t, 4, len(arr))
 	assert.Equal(t, "a", arr[0])
-	assert.Equal(t, float64(10), arr[1])
+	assert.Equal(t, "10", arr[1]) // Scores are returned as strings in RESP
 	assert.Equal(t, "b", arr[2])
-	assert.Equal(t, float64(20), arr[3])
+	assert.Equal(t, "20", arr[3])
 }

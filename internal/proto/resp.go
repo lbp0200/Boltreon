@@ -47,6 +47,22 @@ type Integer int64
 
 func (i Integer) String() string { return ":" + strconv.FormatInt(int64(i), 10) + "\r\n" }
 
+// NestedArray represents a RESP array that can contain other nested arrays
+type NestedArray struct {
+	Elems []RESP
+}
+
+func (n *NestedArray) String() string {
+	var b strings.Builder
+	b.WriteString("*")
+	b.WriteString(strconv.Itoa(len(n.Elems)))
+	b.WriteString("\r\n")
+	for _, elem := range n.Elems {
+		b.WriteString(elem.String())
+	}
+	return b.String()
+}
+
 func ReadRESP(r *bufio.Reader) (*Array, error) {
 	line, err := readLine(r)
 	if err != nil {
@@ -263,8 +279,9 @@ func NewScanResponse(cursor uint64, keys []string) RESP {
 func NewSimpleString(s string) RESP { r := SimpleString(s); return &r }
 func NewBulkString(b []byte) RESP {
 	if b == nil {
-		var r *BulkString
-		return r
+		// 返回一个非 nil 的 *BulkString，但值为 nil
+		var r BulkString = nil
+		return &r
 	}
 	r := BulkString(b)
 	return &r
