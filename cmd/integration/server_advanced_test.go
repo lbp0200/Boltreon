@@ -25,66 +25,6 @@ func TestRole(t *testing.T) {
 	assert.Equal(t, "master", arr[0])
 }
 
-// TestReplicaOf 测试 REPLICAOF 命令
-// 需要主从配置环境，单机模式下跳过
-func TestReplicaOf(t *testing.T) {
-	t.Skip("需要主从配置环境 - 请使用 -replicaof 参数启动从节点")
-	setupTestServer(t)
-	defer teardownTestServer(t)
-
-	ctx := context.Background()
-
-	// REPLICAOF NO ONE - 停止复制
-	result, err := testClient.Do(ctx, "REPLICAOF", "NO", "ONE").Result()
-	assert.NoError(t, err)
-	assert.Equal(t, "OK", result)
-
-	// REPLICAOF - 设置复制（实际上不会有真实从节点）
-	result, err = testClient.Do(ctx, "REPLICAOF", "127.0.0.1", "6379").Result()
-	assert.NoError(t, err)
-	assert.Equal(t, "OK", result)
-}
-
-// TestReplConf 测试 REPLCONF 命令
-// 需要主从配置环境，单机模式下跳过
-func TestReplConf(t *testing.T) {
-	t.Skip("需要主从配置环境 - 请使用 -replicaof 参数启动从节点")
-	setupTestServer(t)
-	defer teardownTestServer(t)
-
-	ctx := context.Background()
-
-	// REPLCONF - 基本配置
-	result, err := testClient.Do(ctx, "REPLCONF", "LISTENING-PORT", "6380").Result()
-	assert.NoError(t, err)
-	assert.Equal(t, "OK", result)
-
-	// REPLCONF - 获取配置
-	result, err = testClient.Do(ctx, "REPLCONF", "CAPA", "eof", "psync2").Result()
-	assert.NoError(t, err)
-	assert.Equal(t, "OK", result)
-}
-
-// TestPSync 测试 PSYNC 命令
-// 需要主从配置环境，单机模式下跳过
-func TestPSync(t *testing.T) {
-	t.Skip("需要主从配置环境 - 请使用 -replicaof 参数启动从节点")
-	setupTestServer(t)
-	defer teardownTestServer(t)
-
-	ctx := context.Background()
-
-	// PSYNC ? -1 - 请求完整同步
-	result, err := testClient.Do(ctx, "PSYNC", "?", "-1").Result()
-	assert.NoError(t, err)
-
-	arr, ok := result.([]interface{})
-	assert.True(t, ok)
-	assert.Equal(t, 3, len(arr))
-	// 格式: [replid, offset, [RDB data...]]
-	assert.Equal(t, "?", arr[0])
-}
-
 // TestConfigGet 测试 CONFIG GET 命令
 func TestConfigGet(t *testing.T) {
 	setupTestServer(t)

@@ -112,10 +112,10 @@ BoltDB supports being managed by redis-sentinel. Key compatibility features:
 ### Master-Slave Setup
 ```bash
 # Start master on port 6379
-./build/boltDB -dir=/tmp/master
+./build/boltDB -dir=/tmp/master -addr=:6379
 
-# Start slave on port 6380
-./build/boltDB -dir=/tmp/slave -replicaof 127.0.0.1 6379
+# Start slave on port 6380 (connects to master's 6379)
+./build/boltDB -dir=/tmp/slave -addr=:6380 -replicaof 127.0.0.1 6379
 ```
 
 ### RDB Loader
