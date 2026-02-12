@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/lbp0200/BoltDB/internal/backup"
+	"github.com/lbp0200/BoltDB/internal/replication"
 	"github.com/lbp0200/BoltDB/internal/server"
 	"github.com/lbp0200/BoltDB/internal/store"
 	"github.com/redis/go-redis/v9"
@@ -42,8 +43,11 @@ func setupTestServer(t *testing.T) {
 	// 创建备份管理器
 	backupMgr := backup.NewBackupManager(testDB, dbPath)
 
+	// 创建复制管理器
+	replMgr := replication.NewReplicationManager(testDB)
+
 	// 创建服务器处理器
-	testServer = &server.Handler{Db: testDB, PubSub: pubsubMgr, Backup: backupMgr}
+	testServer = &server.Handler{Db: testDB, PubSub: pubsubMgr, Backup: backupMgr, Replication: replMgr}
 
 	// 启动服务器（使用随机端口）
 	listener, err = net.Listen("tcp", "127.0.0.1:0")

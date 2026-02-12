@@ -1,11 +1,42 @@
 # 待修复的集成测试
 
 ## 测试状态统计
-- **通过**: 188 个测试 (+4)
+- **通过**: 192 个测试 (+8)
 - **跳过**: 0 个测试
 - **失败**: 0 个测试
 
 ---
+
+## 新增混合集群测试
+
+### BoltDB 与 Redis 混合集群测试
+
+| 测试 | 状态 | 说明 |
+|------|------|------|
+| `TestMixedClusterBoltDBAndRedis` | ✅ PASS | BoltDB 和 Redis 基本操作测试 |
+| `TestMixedClusterReplication` | ✅ PASS | Redis → BoltDB 数据复制 (String/List/Hash/ZSet) |
+| `TestMixedClusterRoleSwitch` | ✅ PASS | 角色切换 (BoltDB/Redis 互为主从) |
+| `TestMixedClusterDataIsolation` | ✅ PASS | 数据隔离验证 |
+
+**测试文件**: `cmd/integration/mixed_cluster_test.go`
+
+**实现内容**:
+1. `TestMixedClusterBoltDBAndRedis` - 测试 BoltDB 和 Redis 独立运行时的基本操作
+2. `TestMixedClusterReplication` - 测试 Redis master → BoltDB slave 复制
+3. `TestMixedClusterRoleSwitch` - 测试 REPLICAOF NO ONE 切换角色
+4. `TestMixedClusterDataIsolation` - 验证数据隔离（相同 key 不同值）
+
+**验证结果**:
+```bash
+go test -v ./cmd/integration/... -run "TestMixed" -timeout 120s
+# 4/4 tests PASS
+```
+
+**复制验证**:
+- String: `SET repl_key1 repl_value1` → BoltDB 正确接收
+- List: `RPUSH list_key a b c` → BoltDB LLen 返回 3
+- Hash: `HSET hash_key field1 value1` → BoltDB HGet 返回 value1
+- ZSet: `ZADD zset_key 1 m1` → BoltDB ZScore 返回 1
 
 ## 已修复测试
 
@@ -190,6 +221,7 @@ redis-cli -p 6379 GET "test"  # 返回 "hello"
 17. ✅ **Redis-Sentinel 兼容性** - PING, ROLE, INFO, REPLCONF, SENTINEL MASTER, 故障检测全部通过
 18. ✅ **BoltDB → Redis 复制** - SET, INCR, LPUSH, ZADD, HSET 成功同步到 Redis slaves
 19. ✅ **SLAVEOF/REPLICAOF 命令** - 实现 SLAVEOF 命令别名和 -replicaof 启动参数
+20. ✅ **混合集群测试** - 4 个新测试覆盖 Redis ↔ BoltDB 复制互操作
 
 ---
 
