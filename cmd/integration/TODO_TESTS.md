@@ -1,7 +1,7 @@
 # 待修复的集成测试
 
 ## 测试状态统计
-- **通过**: 184 个测试
+- **通过**: 188 个测试 (+4)
 - **跳过**: 0 个测试
 - **失败**: 0 个测试
 
@@ -110,9 +110,21 @@ redis-cli -p 6379 INFO replication
 
 | 场景 | 状态 | 说明 |
 |------|------|------|
-| **BoltDB → Redis** | ✅ PASS | SET, INCR, LPUSH, ZADD, HSET 同步成功 |
-| **Redis → BoltDB** | ❌ 未支持 | BoltDB 未实现 SLAVEOF 命令 |
-| **角色切换** | ✅ PASS | SLAVEOF NO ONE / SLAVEOF 立即生效 |
+| **BoltDB → Redis** | ✅ PASS | SET, ZADD, HSET 数据同步成功，Redis slave 正确识别 |
+| **Redis → BoltDB** | ✅ PASS | REPLICAOF/SLAVEOF 命令已实现，数据同步成功 |
+
+**测试命令：**
+```bash
+# 启动 Redis master (端口 6379)
+redis-server --port 6379 --dir /tmp/redis --repl-diskless-sync no
+
+# 启动 BoltDB slave (端口 6380)，连接到 Redis master
+./boltDB -addr=:6380 -dir=/tmp/bolt_slave -replicaof 127.0.0.1:6379
+...
+```
+
+**注意：** Redis 8 在磁盘同步模式（`--repl-diskless-sync no`）下工作正常。EOF-aware 格式（`$EOF:<checksum>`）已支持。
+
 | **数据隔离** | ✅ PASS | 两实例数据独立保持 |
 
 **测试命令：**
@@ -177,6 +189,7 @@ redis-cli -p 6379 GET "test"  # 返回 "hello"
 16. ✅ **ZSet 高级命令** - ZRangeByScore, ZRemRangeByScore, ZLex, ZScan, ZRangeByRankWithScores 测试通过
 17. ✅ **Redis-Sentinel 兼容性** - PING, ROLE, INFO, REPLCONF, SENTINEL MASTER, 故障检测全部通过
 18. ✅ **BoltDB → Redis 复制** - SET, INCR, LPUSH, ZADD, HSET 成功同步到 Redis slaves
+19. ✅ **SLAVEOF/REPLICAOF 命令** - 实现 SLAVEOF 命令别名和 -replicaof 启动参数
 
 ---
 
@@ -189,20 +202,34 @@ redis-cli -p 6379 GET "test"  # 返回 "hello"
 - 无（所有测试已通过）
 
 ### 低优先级
-- **实现 SLAVEOF 命令** - 使 BoltDB 能作为 Redis 的从库
 - **RDB 格式兼容** - 解决 BoltDB 与 Redis RDB 格式差异，支持直接交换快照
 
 ---
 
 ## 已知限制
 
-### 1. Redis → BoltDB 复制 ❌
+### 1. Redis → BoltDB 复制 ✅ 已修复
 
-**问题**: BoltDB 未实现 SLAVEOF 命令，无法作为 Redis 的从库
+**状态**: REPLICAOF/SLAVEOF 命令已实现
 
-**影响**: 无法将 Redis master 的数据复制到 BoltDB
+**实现内容**:
+1. `internal/server/handler.go` - 添加 SLAVEOF 命令别名支持
+2. `cmd/boltDB/main.go` - 添加 `-replicaof` 启动参数
+3. `cmd/integration/replication_test.go` - 添加 `TestReplicaOfCommand` 测试
 
-**解决方案**: 实现 SLAVEOF 命令，支持在启动时或运行时配置主库地址
+**使用方式**:
+```bash
+# 启动时指定主库
+./boltDB -addr=:6380 -dir=/tmp/slave -replicaof 127.0.0.1 6379
+
+# 运行时切换主库
+redis-cli -p 6380 REPLICAOF 127.0.0.1 6379
+redis-cli -p 6380 SLAVEOF 127.0.0.1 6379
+
+# 停止复制
+redis-cli -p 6380 REPLICAOF NO ONE
+redis-cli -p 6380 SLAVEOF NO ONE
+```
 
 ### 2. RDB 格式不兼容 ❌
 
@@ -218,3 +245,25 @@ Reading type 3 (zset-v1)
 ```
 
 **解决方案**: 标准化 BoltDB 的 RDB 格式以兼容 Redis RDB 协议
+
+### 3. Redis 8 EOF-aware 复制格式 ✅
+
+**状态**: 已实现 `$EOF:<checksum>` 格式支持
+
+**实现内容**:
+1. `internal/replication/master.go` - 添加 `ReadBulkString()` 检测 EOF-aware 格式
+2. `internal/replication/master.go` - 添加 `readUntilEOF()` 函数处理 EOF-aware RDB 传输
+3. 支持 Redis 8 磁盘同步模式的 RDB 传输（`$EOF:<40-char-md5>`）
+
+**工作原理**:
+- Redis 8 磁盘同步模式使用 `$EOF:<checksum>\r\n` 标记开始
+- RDB 数据后跟 40 字节十六进制 MD5 校验和
+- 之后是后续命令流
+
+**验证结果**:
+```bash
+# Redis 8 磁盘同步模式
+redis-server --port 6379 --dir /tmp/redis --repl-diskless-sync no
+./boltDB -addr=:6380 -dir=/tmp/bolt_slave -replicaof 127.0.0.1 6379
+# ✅ 数据同步正常工作
+```

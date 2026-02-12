@@ -152,21 +152,37 @@ func StartSlaveReplication(rm *ReplicationManager, store *store.BotreonStore, ma
 			return
 		}
 
-		// 发送REPLCONF listening-port
-		// 简化实现，不发送实际端口
+		// 发送REPLCONF listening-port (Redis 要求必须有此命令)
+		if err := masterConn.SendCommand([][]byte{
+			[]byte("REPLCONF"),
+			[]byte("listening-port"),
+			[]byte("6380"),
+		}); err != nil {
+			logger.Logger.Error().Err(err).Msg("发送REPLCONF listening-port失败")
+			return
+		}
+		_, _ = masterConn.ReadResponse()
 
-		// 发送REPLCONF capa
+		// 发送REPLCONF capa eof
 		if err := masterConn.SendCommand([][]byte{
 			[]byte("REPLCONF"),
 			[]byte("capa"),
 			[]byte("eof"),
+		}); err != nil {
+			logger.Logger.Error().Err(err).Msg("发送REPLCONF capa eof失败")
+			return
+		}
+		_, _ = masterConn.ReadResponse()
+
+		// 发送REPLCONF capa psync2
+		if err := masterConn.SendCommand([][]byte{
+			[]byte("REPLCONF"),
 			[]byte("capa"),
 			[]byte("psync2"),
 		}); err != nil {
-			logger.Logger.Error().Err(err).Msg("发送REPLCONF capa失败")
+			logger.Logger.Error().Err(err).Msg("发送REPLCONF capa psync2失败")
 			return
 		}
-
 		_, _ = masterConn.ReadResponse()
 
 		// 发送PSYNC

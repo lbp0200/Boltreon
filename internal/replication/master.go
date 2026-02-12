@@ -2,7 +2,10 @@ package replication
 
 import (
 	"bufio"
+	"bytes"
+	"errors"
 	"fmt"
+	"io"
 	"net"
 	"sync"
 	"time"
@@ -130,6 +133,12 @@ func (mc *MasterConnection) ReadBulkString() ([]byte, error) {
 		return nil, fmt.Errorf("invalid bulk string format")
 	}
 
+	// 检查是否是 EOF-aware 格式 (Redis 8+): $EOF:<checksum>
+	if len(line) > 5 && string(line[1:5]) == "EOF:" {
+		logger.Logger.Info().Msg("Detected Redis 8+ EOF-aware replication format")
+		return mc.readUntilEOF()
+	}
+
 	// 解析长度
 	var length int
 	if _, err := fmt.Sscanf(string(line[1:]), "%d", &length); err != nil {
@@ -147,6 +156,82 @@ func (mc *MasterConnection) ReadBulkString() ([]byte, error) {
 	}
 
 	return data[:length], nil
+}
+
+// readUntilEOF 读取 EOF-aware 格式的 RDB 数据 (Redis 8+)
+func (mc *MasterConnection) readUntilEOF() ([]byte, error) {
+	mc.mu.RLock()
+	reader := mc.Reader
+	mc.mu.RUnlock()
+
+	// EOF 标记长度（40 字节 hex MD5）
+	eofMarkLen := 40
+
+	// 使用 buffer 累积所有数据
+	var buffer bytes.Buffer
+	buf := make([]byte, 8192)
+
+	for {
+		n, err := reader.Read(buf)
+		if err != nil && !errors.Is(err, io.EOF) {
+			return nil, fmt.Errorf("read RDB data failed: %w", err)
+		}
+
+		if n > 0 {
+			buffer.Write(buf[:n])
+		}
+
+		data := buffer.Bytes()
+		dataLen := len(data)
+
+		// 在数据中查找 EOF 标记（40 字节十六进制字符串）
+		// EOF 标记应该在数据末尾
+		if dataLen >= eofMarkLen {
+			// 检查最后 40 个字节是否是有效的十六进制
+			isHex := true
+			for j := 0; j < eofMarkLen; j++ {
+				c := data[dataLen-eofMarkLen+j]
+				if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+					isHex = false
+					break
+				}
+			}
+
+			if isHex {
+				// 找到 EOF 标记
+				// RDB 数据是 EOF 标记之前的所有内容
+				rdbData := data[:dataLen-eofMarkLen]
+
+				// 跳过 EOF 标记后的 \r\n
+				cmdStart := dataLen - eofMarkLen
+				for cmdStart < len(data) && (data[cmdStart] == '\r' || data[cmdStart] == '\n') {
+					cmdStart++
+				}
+
+				// 剩余数据是后续命令
+				cmdsData := data[cmdStart:]
+
+				// 重置 Reader
+				if len(cmdsData) > 0 {
+					mc.mu.Lock()
+					mc.Reader = bufio.NewReader(bytes.NewReader(cmdsData))
+					mc.mu.Unlock()
+				}
+
+				return rdbData, nil
+			}
+		}
+
+		if errors.Is(err, io.EOF) {
+			// 连接关闭，返回所有数据
+			return data, nil
+		}
+
+		// 如果 buffer 太大，发出警告
+		if buffer.Len() > 10*1024*1024 {
+			logger.Logger.Warn().Int("buffer_size", buffer.Len()).Msg("Buffer growing large in readUntilEOF")
+		}
+	}
 }
 
 // SetReplOffset 设置复制偏移量

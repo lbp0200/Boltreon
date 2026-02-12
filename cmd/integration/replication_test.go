@@ -189,3 +189,38 @@ func TestReplicationWithDifferentTypes(t *testing.T) {
 	assert.True(t, ok)
 	assert.True(t, len(info) > 0)
 }
+
+// TestReplicaOfCommand 测试 REPLICAOF 和 SLAVEOF 命令
+func TestReplicaOfCommand(t *testing.T) {
+	setupTestServer(t)
+	defer teardownTestServer(t)
+
+	ctx := context.Background()
+
+	// 测试 REPLICAOF NO ONE (停止复制，提升为主节点)
+	result, err := testClient.Do(ctx, "REPLICAOF", "NO", "ONE").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, "OK", result)
+
+	// 测试 SLAVEOF NO ONE (别名)
+	result, err = testClient.Do(ctx, "SLAVEOF", "NO", "ONE").Result()
+	assert.NoError(t, err)
+	assert.Equal(t, "OK", result)
+}
+
+// TestReplicaOfCommandErrors 测试 REPLICAOF 错误处理
+func TestReplicaOfCommandErrors(t *testing.T) {
+	setupTestServer(t)
+	defer teardownTestServer(t)
+
+	ctx := context.Background()
+
+	// 测试参数不足的错误
+	result, err := testClient.Do(ctx, "REPLICAOF").Result()
+	assert.Error(t, err)
+	assert.Nil(t, result)
+
+	result, err = testClient.Do(ctx, "SLAVEOF", "NO").Result()
+	assert.Error(t, err)
+	assert.Nil(t, result)
+}

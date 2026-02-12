@@ -19,6 +19,7 @@ func main() {
 	dbPath := flag.String("dir", os.TempDir(), "badger dir")
 	logLevel := flag.String("log-level", "", "log level: DEBUG, INFO, WARNING, ERROR (default: WARNING, or from BOLTDB_LOG_LEVEL env)")
 	clusterEnabled := flag.Bool("cluster", false, "enable cluster mode")
+	replicaof := flag.String("replicaof", "", "replicaof master host:port")
 	flag.Parse()
 
 	// 设置日志级别
@@ -43,6 +44,14 @@ func main() {
 
 	// 初始化复制管理器
 	replMgr := replication.NewReplicationManager(db)
+
+	// 如果指定了 -replicaof 参数，启动从复制
+	if *replicaof != "" {
+		logger.Logger.Info().Str("master", *replicaof).Msg("Starting slave replication")
+		if err := replication.StartSlaveReplication(replMgr, db, *replicaof); err != nil {
+			logger.Logger.Fatal().Err(err).Str("master", *replicaof).Msg("Failed to start slave replication")
+		}
+	}
 
 	// 初始化备份管理器
 	backupDir := *dbPath + "/backup"

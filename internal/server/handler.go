@@ -3342,7 +3342,7 @@ func (h *Handler) executeCommand(cmd string, args [][]byte, remoteAddr string) p
 		}
 
 	// 复制命令
-	case "REPLICAOF":
+	case "REPLICAOF", "SLAVEOF":
 		if h.Replication == nil {
 			return proto.NewError("ERR replication not enabled")
 		}
