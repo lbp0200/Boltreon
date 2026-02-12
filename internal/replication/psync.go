@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/lbp0200/BoltDB/internal/logger"
 	"github.com/lbp0200/BoltDB/internal/proto"
@@ -242,13 +243,14 @@ func StartSlaveReplication(rm *ReplicationManager, store *store.BotreonStore, ma
 				break
 			}
 
-			// 执行命令（简化实现）
-			// 实际应该解析命令并执行
+			// 执行命令
 			logger.Logger.Debug().
 				Int("arg_count", len(req.Args)).
+				Str("cmd", string(req.Args[0])).
 				Msg("从主节点收到命令")
 
-			// 更新复制偏移量
+			// 执行命令并更新偏移量
+			executeReplicatedCommand(store, req.Args)
 			cmdBytes := serializeCommand(req.Args)
 			rm.IncrementReplOffset(int64(len(cmdBytes)))
 		}
@@ -272,5 +274,235 @@ func StopSlaveReplication(rm *ReplicationManager) {
 			logger.Logger.Debug().Err(err).Msg("failed to close master connection")
 		}
 		rm.masterConn = nil
+	}
+}
+
+// executeReplicatedCommand 执行从主节点接收到的复制命令
+func executeReplicatedCommand(s *store.BotreonStore, args [][]byte) {
+	if len(args) == 0 {
+		return
+	}
+
+	cmd := strings.ToUpper(string(args[0]))
+
+	switch cmd {
+	case "SET":
+		if len(args) >= 3 {
+			key := string(args[1])
+			value := string(args[2])
+			// 检查是否有EX或PX选项
+			if len(args) > 3 {
+				opt := strings.ToUpper(string(args[3]))
+				if opt == "EX" && len(args) >= 5 {
+					// EX seconds
+					if sec, err := strconv.ParseInt(string(args[4]), 10, 64); err == nil {
+						_ = s.SetWithTTL(key, value, time.Duration(sec)*time.Second)
+						return
+					}
+				} else if opt == "PX" && len(args) >= 5 {
+					// PX milliseconds
+					if ms, err := strconv.ParseInt(string(args[4]), 10, 64); err == nil {
+						_ = s.SetWithTTL(key, value, time.Duration(ms)*time.Millisecond)
+						return
+					}
+				}
+			}
+			_ = s.Set(key, value)
+		}
+
+	case "DEL":
+		if len(args) >= 2 {
+			for i := 1; i < len(args); i++ {
+				_, _ = s.Del(string(args[i]))
+			}
+		}
+
+	case "INCR", "INCRBY":
+		if len(args) >= 2 {
+			key := string(args[1])
+			var delta int64 = 1
+			if cmd == "INCRBY" && len(args) >= 3 {
+				if d, err := strconv.ParseInt(string(args[2]), 10, 64); err == nil {
+					delta = d
+				}
+			}
+			_, _ = s.INCRBY(key, delta)
+		}
+
+	case "DECR", "DECRBY":
+		if len(args) >= 2 {
+			key := string(args[1])
+			var delta int64 = 1
+			if cmd == "DECRBY" && len(args) >= 3 {
+				if d, err := strconv.ParseInt(string(args[2]), 10, 64); err == nil {
+					delta = d
+				}
+			}
+			_, _ = s.DECRBY(key, delta)
+		}
+
+	case "APPEND":
+		if len(args) >= 3 {
+			key := string(args[1])
+			value := string(args[2])
+			_, _ = s.APPEND(key, value)
+		}
+
+	case "RPUSH":
+		if len(args) >= 3 {
+			key := string(args[1])
+			for i := 2; i < len(args); i++ {
+				_, _ = s.RPush(key, string(args[i]))
+			}
+		}
+
+	case "LPUSH":
+		if len(args) >= 3 {
+			key := string(args[1])
+			for i := 2; i < len(args); i++ {
+				_, _ = s.LPush(key, string(args[i]))
+			}
+		}
+
+	case "LSET":
+		if len(args) >= 4 {
+			key := string(args[1])
+			if index, err := strconv.ParseInt(string(args[2]), 10, 64); err == nil {
+				_ = s.LSet(key, index, string(args[3]))
+			}
+		}
+
+	case "LREM":
+		if len(args) >= 4 {
+			key := string(args[1])
+			if count, err := strconv.ParseInt(string(args[2]), 10, 64); err == nil {
+				_, _ = s.LRem(key, count, string(args[3]))
+			}
+		}
+
+	case "LTRIM":
+		if len(args) >= 4 {
+			key := string(args[1])
+			if start, err := strconv.ParseInt(string(args[2]), 10, 64); err == nil {
+				if stop, err := strconv.ParseInt(string(args[3]), 10, 64); err == nil {
+					_ = s.LTrim(key, start, stop)
+				}
+			}
+		}
+
+	case "SADD":
+		if len(args) >= 3 {
+			key := string(args[1])
+			for i := 2; i < len(args); i++ {
+				_, _ = s.SAdd(key, string(args[i]))
+			}
+		}
+
+	case "SREM":
+		if len(args) >= 3 {
+			key := string(args[1])
+			for i := 2; i < len(args); i++ {
+				_, _ = s.SRem(key, string(args[i]))
+			}
+		}
+
+	case "SMOVE":
+		if len(args) >= 4 {
+			src := string(args[1])
+			dst := string(args[2])
+			member := string(args[3])
+			_, _ = s.SMove(src, dst, member)
+		}
+
+	case "SPOP":
+		if len(args) >= 2 {
+			key := string(args[1])
+			_, _ = s.SPop(key)
+		}
+
+	case "HSET":
+		if len(args) >= 4 {
+			key := string(args[1])
+			field := string(args[2])
+			value := string(args[3])
+			_ = s.HSet(key, field, value)
+		}
+
+	case "HMSET":
+		if len(args) >= 4 {
+			key := string(args[1])
+			for i := 2; i+1 < len(args); i += 2 {
+				_ = s.HSet(key, string(args[i]), string(args[i+1]))
+			}
+		}
+
+	case "HINCRBY":
+		if len(args) >= 4 {
+			key := string(args[1])
+			field := string(args[2])
+			if delta, err := strconv.ParseInt(string(args[3]), 10, 64); err == nil {
+				_, _ = s.HIncrBy(key, field, delta)
+			}
+		}
+
+	case "HINCRBYFLOAT":
+		if len(args) >= 4 {
+			key := string(args[1])
+			field := string(args[2])
+			if delta, err := strconv.ParseFloat(string(args[3]), 64); err == nil {
+				_, _ = s.HIncrByFloat(key, field, delta)
+			}
+		}
+
+	case "HDEL":
+		if len(args) >= 3 {
+			key := string(args[1])
+			fields := make([]string, 0, len(args)-2)
+			for i := 2; i < len(args); i++ {
+				fields = append(fields, string(args[i]))
+			}
+			_, _ = s.HDel(key, fields...)
+		}
+
+	case "ZADD":
+		if len(args) >= 4 {
+			key := string(args[1])
+			members := make([]store.ZSetMember, 0, (len(args)-2)/2)
+			for i := 2; i+1 < len(args); i += 2 {
+				if score, err := strconv.ParseFloat(string(args[i]), 64); err == nil {
+					members = append(members, store.ZSetMember{
+						Member: string(args[i+1]),
+						Score:  score,
+					})
+				}
+			}
+			if len(members) > 0 {
+				_ = s.ZAdd(key, members)
+			}
+		}
+
+	case "ZINCRBY":
+		if len(args) >= 4 {
+			key := string(args[1])
+			if delta, err := strconv.ParseFloat(string(args[2]), 64); err == nil {
+				member := string(args[3])
+				_, _ = s.ZIncrBy(key, member, delta)
+			}
+		}
+
+	case "ZREM":
+		if len(args) >= 3 {
+			key := string(args[1])
+			for i := 2; i < len(args); i++ {
+				_ = s.ZRem(key, string(args[i]))
+			}
+		}
+
+	case "ZPOPMAX", "ZPOPMIN":
+		// 这些命令需要特殊处理，暂时跳过
+		logger.Logger.Debug().Str("cmd", cmd).Msg("忽略不支持的复制命令")
+
+	default:
+		logger.Logger.Debug().Str("cmd", cmd).Msg("收到未处理的复制命令")
 	}
 }

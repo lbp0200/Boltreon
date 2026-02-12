@@ -23,6 +23,7 @@ type SlaveConnection struct {
 	Ready         bool   // 是否准备好接收命令
 	LastAckTime   int64  // 最后一次ACK时间
 	mu            sync.RWMutex
+	closeOnce     sync.Once
 }
 
 // NewSlaveConnection 创建新的从节点连接
@@ -169,13 +170,16 @@ func (sc *SlaveConnection) ReadCommand() (*proto.Array, error) {
 
 // Close 关闭连接
 func (sc *SlaveConnection) Close() error {
-	sc.mu.Lock()
-	defer sc.mu.Unlock()
+	var err error
+	sc.closeOnce.Do(func() {
+		sc.mu.Lock()
+		defer sc.mu.Unlock()
 
-	if sc.Conn != nil {
-		return sc.Conn.Close()
-	}
-	return nil
+		if sc.Conn != nil {
+			err = sc.Conn.Close()
+		}
+	})
+	return err
 }
 
 // GetLastAckTime 获取最后ACK时间

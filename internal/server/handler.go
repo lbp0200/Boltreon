@@ -135,16 +135,33 @@ func (h *Handler) ServeTCP(l net.Listener) error {
 func (h *Handler) handleConnection(conn net.Conn) {
 	remoteAddr := conn.RemoteAddr().String()
 	logger.Logger.Debug().Str("remote_addr", remoteAddr).Msg("新连接建立")
+
+	// 标记连接是否已由复制处理接管
+	// 如果为true，主handler不关闭连接，由复制处理的goroutine负责关闭
+	replicationOwned := false
+
 	defer func() {
-		logger.Logger.Debug().Str("remote_addr", remoteAddr).Msg("连接关闭")
-		if err := conn.Close(); err != nil {
-			logger.Logger.Debug().Err(err).Msg("failed to close connection")
+		if !replicationOwned {
+			logger.Logger.Debug().Str("remote_addr", remoteAddr).Msg("连接关闭")
+			if err := conn.Close(); err != nil {
+				logger.Logger.Debug().Err(err).Msg("failed to close connection")
+			}
+		} else {
+			logger.Logger.Debug().Str("remote_addr", remoteAddr).Msg("连接已由复制处理接管")
 		}
 	}()
 
 	reader := bufio.NewReader(conn)
 	writer := bufio.NewWriter(conn)
+
+	// 在复制接管时，需要关闭reader/writer以防止defer尝试Flush
+	// 但连接本身保持打开，由handleSlaveReplicationConnection负责关闭
 	defer func() {
+		if replicationOwned {
+			// 只关闭writer的Flush错误，不关闭连接
+			// 连接由handleSlaveReplicationConnection goroutine关闭
+			return
+		}
 		if err := writer.Flush(); err != nil {
 			logger.Logger.Debug().Err(err).Msg("failed to flush writer")
 		}
@@ -174,11 +191,19 @@ func (h *Handler) handleConnection(conn net.Conn) {
 		commandsProcessed := 0
 
 		// 处理第一个命令
-		if resp := h.processRequest(req, reader, remoteAddr, writer); resp != nil {
+		if resp := h.processRequest(req, reader, remoteAddr, writer, conn); resp != nil {
+			// 检查是否是复制接管信号
+			if _, isTakeover := resp.(ReplicationTakeoverSignal); isTakeover {
+				replicationOwned = true
+				logger.Logger.Debug().
+					Str("remote_addr", remoteAddr).
+					Msg("复制接管连接")
+				return
+			}
 			responses = append(responses, resp)
 			commandsProcessed++
 		} else {
-			// 处理失败，直接返回
+			// 处理失败或连接已由复制接管，直接返回
 			return
 		}
 
@@ -191,11 +216,19 @@ func (h *Handler) handleConnection(conn net.Conn) {
 				break
 			}
 
-			if resp := h.processRequest(req, reader, remoteAddr, writer); resp != nil {
+			if resp := h.processRequest(req, reader, remoteAddr, writer, conn); resp != nil {
+				// 检查是否是复制接管信号
+				if _, isTakeover := resp.(ReplicationTakeoverSignal); isTakeover {
+					replicationOwned = true
+					logger.Logger.Debug().
+						Str("remote_addr", remoteAddr).
+						Msg("复制接管连接")
+					return
+				}
 				responses = append(responses, resp)
 				commandsProcessed++
 			} else {
-				// 处理失败，直接返回
+				// 处理失败或连接已由复制接管，直接返回
 				return
 			}
 		}
@@ -229,7 +262,8 @@ func (h *Handler) handleConnection(conn net.Conn) {
 
 // processRequest 处理单个请求，返回响应
 // PSYNC特殊处理：如果需要全量同步，会在返回响应后发送RDB数据
-func (h *Handler) processRequest(req *proto.Array, reader *bufio.Reader, remoteAddr string, writer *bufio.Writer) proto.RESP {
+// 返回 nil 表示连接已由复制接管，需要关闭处理循环
+func (h *Handler) processRequest(req *proto.Array, reader *bufio.Reader, remoteAddr string, writer *bufio.Writer, conn net.Conn) proto.RESP {
 	args := req.Args
 	if len(args) == 0 {
 		logger.Logger.Warn().Str("remote_addr", remoteAddr).Msg("收到空命令")
@@ -244,7 +278,12 @@ func (h *Handler) processRequest(req *proto.Array, reader *bufio.Reader, remoteA
 
 	// PSYNC特殊处理
 	if cmd == "PSYNC" && h.Replication != nil && h.Replication.IsMaster() {
-		return h.handlePSyncWithRDB(args[1:], remoteAddr, writer)
+		resp := h.handlePSyncWithRDB(args[1:], remoteAddr, conn, reader, writer)
+		// 如果返回nil，表示连接已由复制接管，需要关闭处理循环
+		if resp == nil {
+			return nil // 信号: 关闭连接
+		}
+		return resp
 	}
 
 	resp := h.executeCommand(cmd, args[1:], remoteAddr)
@@ -292,7 +331,15 @@ func getResponseType(resp proto.RESP) string {
 
 // handlePSyncWithRDB 处理PSYNC命令并发送RDB数据（全量同步）
 // 这是executeCommand的特例，用于在全量同步时直接发送RDB数据
-func (h *Handler) handlePSyncWithRDB(args [][]byte, remoteAddr string, writer *bufio.Writer) proto.RESP {
+// 返回 nil 表示正常处理
+// 返回 ReplicationTakeoverSignal{} 表示连接已由复制接管，需要关闭处理循环但不关闭连接
+type ReplicationTakeoverSignal struct{}
+
+func (ReplicationTakeoverSignal) String() string           { return "replication-takeover" }
+func (ReplicationTakeoverSignal) Error() string            { return "replication takeover" }
+func (ReplicationTakeoverSignal) IsError() bool            { return false }
+
+func (h *Handler) handlePSyncWithRDB(args [][]byte, remoteAddr string, conn net.Conn, reader *bufio.Reader, writer *bufio.Writer) proto.RESP {
 	if len(args) < 2 {
 		return proto.NewError("ERR wrong number of arguments for 'PSYNC' command")
 	}
@@ -355,12 +402,93 @@ func (h *Handler) handlePSyncWithRDB(args [][]byte, remoteAddr string, writer *b
 			Int("rdb_size", len(rdbData)).
 			Msg("发送FULLRESYNC和RDB到从节点")
 
-		// 返回空响应，因为我们已经直接发送了
-		return proto.NewSimpleString("OK")
+		// 创建从节点连接并注册
+		slaveConn := replication.NewSlaveConnection(conn)
+		// 设置初始复制偏移量
+		slaveConn.SetReplOffset(result.Offset)
+		// 标记为已就绪（可以接收命令）
+		slaveConn.SetReady(true)
+
+		// 添加到复制管理器
+		h.Replication.AddSlave(slaveConn)
+
+		// 启动goroutine处理从节点的复制连接（接收REPLCONF ACK等）
+		go h.handleSlaveReplicationConnection(slaveConn)
+
+		// 返回复制接管信号，主handler不会关闭连接
+		return ReplicationTakeoverSignal{}
 	} else {
 		// 发送CONTINUE响应
 		response := fmt.Sprintf("+CONTINUE %s\r\n", result.ReplId)
 		return proto.NewSimpleString(strings.TrimSpace(response))
+	}
+}
+
+// handleSlaveReplicationConnection 处理从节点的复制连接
+// 这个goroutine负责从节点连接的生命周期：
+// 1. 接收 REPLCONF ACK 命令（从节点确认已接收的命令偏移量）
+// 2. 保持连接打开，直到从节点断开
+// 3. 负责关闭连接
+func (h *Handler) handleSlaveReplicationConnection(slave *replication.SlaveConnection) {
+	defer func() {
+		// 关闭连接
+		if err := slave.Close(); err != nil {
+			logger.Logger.Debug().
+				Str("slave_id", slave.ID).
+				Err(err).
+				Msg("关闭从节点连接失败")
+		}
+		// 连接关闭时移除从节点
+		h.Replication.RemoveSlave(slave.ID)
+		logger.Logger.Info().
+			Str("slave_id", slave.ID).
+			Str("slave_addr", slave.Addr).
+			Msg("从节点连接已关闭")
+	}()
+
+	logger.Logger.Info().
+		Str("slave_id", slave.ID).
+		Str("slave_addr", slave.Addr).
+		Msg("开始处理从节点复制连接")
+
+	// 持续接收从节点的命令（主要是REPLCONF ACK）
+	for {
+		req, err := proto.ReadRESP(slave.Reader)
+		if err != nil {
+			logger.Logger.Debug().
+				Str("slave_id", slave.ID).
+				Err(err).
+				Msg("读取从节点命令失败")
+			return
+		}
+
+		// 解析命令
+		if len(req.Args) == 0 {
+			continue
+		}
+
+		cmd := strings.ToUpper(string(req.Args[0]))
+		logger.Logger.Debug().
+			Str("slave_id", slave.ID).
+			Str("cmd", cmd).
+			Msg("收到从节点命令")
+
+		// 处理 REPLCONF ACK 命令
+		if cmd == "REPLCONF" && len(req.Args) >= 3 {
+			if strings.ToUpper(string(req.Args[1])) == "ACK" {
+				// 解析偏移量
+				offset, _ := strconv.ParseInt(string(req.Args[2]), 10, 64)
+				slave.UpdateReplAck(offset)
+				h.Replication.UpdateSlaveAckOffset(slave.ID, offset)
+				continue
+			}
+		}
+
+		// 其他命令（理论上不应该有）
+		logger.Logger.Warn().
+			Str("slave_id", slave.ID).
+			Str("cmd", cmd).
+			Msg("从节点发送了未知命令")
 	}
 }
 

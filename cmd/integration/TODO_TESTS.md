@@ -1,59 +1,49 @@
 # 待修复的集成测试
 
 ## 测试状态统计
-- **通过**: 165 个测试
-- **跳过**: 6 个测试（需要主从配置环境）
+- **通过**: 181 个测试
+- **跳过**: 3 个测试（需要主从配置环境）
 - **失败**: 0 个测试
 
 ---
 
 ## 已修复测试
 
-### 1. DUMP / RESTORE 测试 ✅
+### 1. 主从复制完整实现 ✅
 
 | 测试 | 状态 | 说明 |
 |------|------|------|
-| `TestRestore` | ✅ 已修复 | RESTORE 参数处理已修复，支持 TTL 参数 |
+| `TestReplicationMasterSlaveBasic` | ✅ 已通过 | 基本键复制 |
+| `TestReplicationMasterSlaveMultipleKeys` | ✅ 已通过 | 多个键复制 |
+| `TestReplicationMasterSlaveCounter` | ✅ 已通过 | INCR/DECR 计数器复制 |
+| `TestReplicationMasterSlaveList` | ✅ 已通过 | 列表复制 (RPUSH/LPUSH) |
+| `TestReplicationMasterSlaveHash` | ✅ 已通过 | 哈希复制 (HMSET) |
+| `TestReplicationMasterSlaveSet` | ✅ 已通过 | 集合复制 (SADD) |
+| `TestReplicationMasterSlaveZSet` | ✅ 已通过 | 有序集合复制 (ZADD) |
+| `TestReplicationMasterSlaveDEL` | ✅ 已通过 | 删除复制 |
+| `TestReplicationMasterSlaveInfo` | ✅ 已通过 | 复制信息验证 |
+| `TestReplicationMasterSlaveRole` | ✅ 已通过 | ROLE 命令验证 |
 
-### 2. 订阅/取消订阅测试 ✅
+**修复内容：**
+1. `internal/server/handler.go` - 修改 `handlePSyncWithRDB` 函数：
+   - 发送 FULLRESYNC + RDB 后保持连接打开
+   - 创建 `SlaveConnection` 并添加到 `rm.slaves`
+   - 启动 goroutine 处理从节点 ACK 命令
+   - 添加 `ReplicationTakeoverSignal` 类型处理连接转移
 
-| 测试 | 状态 | 说明 |
-|------|------|------|
-| `TestSubscribe` | ✅ 已通过 | 测试正常工作 |
-| `TestUnsubscribe` | ✅ 已修复 | 返回正确的数组格式 |
-| `TestPSubscribe` | ✅ 已通过 | 测试正常工作 |
-| `TestPUnsubscribe` | ✅ 已修复 | 返回正确的数组格式 |
-| `TestUnsubscribeAll` | ✅ 已通过 | 测试正常工作 |
-| `TestTimeoutUnsubscribe` | ✅ 已通过 | 测试正常工作 |
+2. `internal/server/handler.go` - 添加 `handleSlaveReplicationConnection` 函数：
+   - 持续接收从节点的 REPLCONF ACK 命令
+   - 负责关闭连接和清理从节点
 
-### 3. CLIENT 命令测试 ✅
+3. `internal/replication/psync.go` - 添加 `executeReplicatedCommand` 函数：
+   - 支持 String、List、Set、Hash、ZSet 数据类型的复制命令执行
+   - 正确解析和执行 SET、INCR、RPUSH、SADD、HMSET、ZADD 等命令
 
-| 测试 | 状态 | 说明 |
-|------|------|------|
-| `TestClientInfo` | ✅ 已实现 | 返回客户端详细信息 |
-| `TestClientNoEvict` | ✅ 已实现 | NOEVICT 命令 |
-| `TestClientTracking` | ✅ 已实现 | TRACKING 命令 |
-| `TestClientGetName` | ✅ 已修复 | 正确处理 nil 响应 |
-| `TestClientSetName` | ✅ 已修复 | 正确保存客户端名称 |
-| `TestClientKill` | ✅ 已修复 | 返回 0 表示无连接被杀死 |
-
-### 4. 其他测试 ✅
-
-| 测试 | 文件 | 说明 |
-|------|------|------|
-| `TestSortBy` | `key_advanced_test.go` | BY 选项已实现 |
-| `TestSortStore` | `key_advanced_test.go` | STORE 使用 RPush 替代 LPush |
-| `TestObjectEncoding` | `key_advanced_test.go` | 已通过 |
-| `TestObjectIdleTime` | `key_advanced_test.go` | 已通过 |
-| `TestObjectFreq` | `key_advanced_test.go` | 返回整数 0 |
-| `TestBgSave` | `server_advanced_test.go` | 添加 BackupManager 支持 |
-| `TestLastSave` | `server_advanced_test.go` | 添加 BGSAVE 预处理 |
-| `TestXLen` | `stream_advanced_test.go` | 返回 0 而非错误 |
-| `TestXTrim` | `stream_advanced_test.go` | 支持 ~ 近似选项 |
-| `TestConfigSet` | `server_advanced_test.go` | CONFIG SET/REWRITE 已实现 |
-| `TestModuleList` | `server_advanced_test.go` | MODULE LIST 已实现 |
-| `TestXReadGroup` | `stream_advanced_test.go` | 修复响应格式为 Redis 兼容 |
-| `TestXRange` | `stream_advanced_test.go` | 修复响应格式为 Redis 兼容 |
+**验证结果：**
+```bash
+go test -v ./cmd/integration/... -run "TestReplicationMasterSlave" -timeout 60s
+# 10/10 tests PASS
+```
 
 ---
 
@@ -86,16 +76,13 @@
 |------|------|------|
 | `TestDump` | `key_advanced_test.go` | 需要完整 RDB 格式支持 |
 
-### 8. 复制相关测试 ✅ (已跳过)
+### 8. 复制相关测试 ⏭️ (已跳过)
 
 | 测试 | 文件 | 状态 |
 |------|------|------|
 | `TestReplicationSlave` | `replication_test.go` | ⏭️ 跳过 - 需要主从配置 |
 | `TestReplicationSync` | `replication_test.go` | ⏭️ 跳过 - 需要主从配置 |
 | `TestReplicationRoleInfo` | `replication_test.go` | ⏭️ 跳过 - 需要主从配置 |
-| `TestReplicaOf` | `server_advanced_test.go` | ⏭️ 跳过 - 需要主从配置 |
-| `TestReplConf` | `server_advanced_test.go` | ⏭️ 跳过 - 需要主从配置 |
-| `TestPSync` | `server_advanced_test.go` | ⏭️ 跳过 - 需要主从配置 |
 
 > 注意：复制相关测试需要在主从模式下运行，请使用 `-replicaof` 参数启动从节点。
 
@@ -134,9 +121,6 @@
 - `TestReplicationSlave` - 从节点复制测试
 - `TestReplicationSync` - 同步过程测试
 - `TestReplicationRoleInfo` - 角色详细信息测试
-- `TestReplicaOf` - REPLICAOF 命令测试
-- `TestReplConf` - REPLCONF 命令测试
-- `TestPSync` - PSYNC 命令测试
 
 运行方式：
 ```bash

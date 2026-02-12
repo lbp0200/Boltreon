@@ -27,6 +27,7 @@ type ReplicationManager struct {
 	replId          string                    // 复制ID(主节点运行ID)
 	store           *store.BotreonStore       // 数据存储
 	stopCh          chan struct{}             // 停止信号
+	closeOnce       sync.Once                 // 确保关闭只执行一次
 }
 
 // NewReplicationManager 创建新的复制管理器
@@ -223,10 +224,12 @@ func serializeCommand(cmd [][]byte) []byte {
 
 // Stop 停止复制管理器
 func (rm *ReplicationManager) Stop() {
+	rm.closeOnce.Do(func() {
+		close(rm.stopCh)
+	})
+
 	rm.mu.Lock()
 	defer rm.mu.Unlock()
-
-	close(rm.stopCh)
 
 	// 关闭所有从节点连接
 	for _, slave := range rm.slaves {

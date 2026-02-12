@@ -21,6 +21,7 @@ type MasterConnection struct {
 	ReplId        string
 	mu            sync.RWMutex
 	stopCh        chan struct{}
+	closeOnce     sync.Once
 }
 
 // NewMasterConnection 创建新的主节点连接
@@ -178,10 +179,12 @@ func (mc *MasterConnection) GetReplId() string {
 
 // Close 关闭连接
 func (mc *MasterConnection) Close() error {
+	mc.closeOnce.Do(func() {
+		close(mc.stopCh)
+	})
+
 	mc.mu.Lock()
 	defer mc.mu.Unlock()
-
-	close(mc.stopCh)
 
 	if mc.Conn != nil {
 		return mc.Conn.Close()
