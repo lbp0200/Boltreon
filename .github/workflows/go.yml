@@ -165,8 +165,8 @@ jobs:
           LINUX_ARM64=$(shasum -a 256 /tmp/linux-arm64 | awk '{print $1}')
           LINUX_AMD64=$(shasum -a 256 /tmp/linux-amd64 | awk '{print $1}')
 
-          # Clone homebrew formula repo
-          git clone https://github.com/lbp0200/homebrew-boltdb.git /tmp/homebrew-boltdb
+          # Clone homebrew formula repo using token
+          git clone https://x-access-token:${{ secrets.HOMEBREW_TOKEN }}@github.com/lbp0200/homebrew-boltdb.git /tmp/homebrew-boltdb
 
           # Write formula file
           cd /tmp/homebrew-boltdb
@@ -212,7 +212,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git add Formula/boltdb.rb
           git commit -m "Update BoltDB to $VERSION"
-          git push
+          git push https://x-access-token:${{ secrets.HOMEBREW_TOKEN }}@github.com/lbp0200/homebrew-boltdb.git
 
   lint:
     runs-on: ubuntu-latest
