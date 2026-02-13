@@ -48,6 +48,9 @@ type BotreonStore struct {
 	readCache  *LRUCache // 读缓存（用于 GET、HGET 等读操作）
 	writeCache *LRUCache // 写缓存（用于 SET、HSET 等写操作，减少磁盘写入）
 
+	// Key-level locking for atomic operations
+	keyLockMgr *KeyLockManager
+
 	// Blocking queue support
 	blockingMu     sync.RWMutex
 	blockingPopChans map[string][]chan BlockingResult // key -> channels waiting for data
@@ -110,6 +113,7 @@ func NewBotreonStoreWithCompression(path string, compressionType CompressionType
 		compressionType: compressionType,
 		readCache:       readCache,
 		writeCache:      writeCache,
+		keyLockMgr:      NewKeyLockManager(256),
 		blockingPopChans:  make(map[string][]chan BlockingResult),
 		streamBlockingChans: make(map[string][]chan StreamReadResult),
 	}, nil

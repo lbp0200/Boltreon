@@ -301,29 +301,35 @@ func (s *BotreonStore) setIntValue(txn *badger.Txn, key string, value int64) err
 
 // INCR 实现 Redis INCR 命令，将键的值加1
 func (s *BotreonStore) INCR(key string) (int64, error) {
+	s.keyLockMgr.Lock(key)
+	defer s.keyLockMgr.Unlock(key)
+
 	var newValue int64
-	err := s.retryUpdateWithFn(func(txn *badger.Txn) error {
+	err := s.db.Update(func(txn *badger.Txn) error {
 		oldValue, err := s.getIntValue(txn, key)
 		if err != nil {
 			return err
 		}
 		newValue = oldValue + 1
 		return s.setIntValue(txn, key, newValue)
-	}, 10)
+	})
 	return newValue, err
 }
 
 // INCRBY 实现 Redis INCRBY 命令，将键的值增加指定整数
 func (s *BotreonStore) INCRBY(key string, increment int64) (int64, error) {
+	s.keyLockMgr.Lock(key)
+	defer s.keyLockMgr.Unlock(key)
+
 	var newValue int64
-	err := s.retryUpdateWithFn(func(txn *badger.Txn) error {
+	err := s.db.Update(func(txn *badger.Txn) error {
 		oldValue, err := s.getIntValue(txn, key)
 		if err != nil {
 			return err
 		}
 		newValue = oldValue + increment
 		return s.setIntValue(txn, key, newValue)
-	}, 10)
+	})
 	return newValue, err
 }
 
