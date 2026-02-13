@@ -66,11 +66,11 @@ jobs:
           # Update version
           sed -i "s/version \".*\"/version \"$VERSION_NUM\"/" homebrew-boltdb/Formula/boltdb.rb
 
-          # Update SHA256 hashes
-          sed -i "0,/sha256 \".*\"/s//sha256 \"$DARWIN_ARM64\"/" homebrew-boltdb/Formula/boltdb.rb
-          sed -i "0,/sha256 \".*\"/s//sha256 \"$DARWIN_AMD64\"/" homebrew-boltdb/Formula/boltdb.rb
-          sed -i "0,/sha256 \".*\"/s//sha256 \"$LINUX_ARM64\"/" homebrew-boltdb/Formula/boltdb.rb
-          sed -i "0,/sha256 \".*\"/s//sha256 \"$LINUX_AMD64\"/" homebrew-boltdb/Formula/boltdb.rb
+          # Update all SHA256 hashes at once using perl
+          perl -i -pe "s|sha256 \".*\"|sha256 \"$DARWIN_ARM64\"| if \$c++ == 0" homebrew-boltdb/Formula/boltdb.rb
+          perl -i -pe "s|sha256 \".*\"|sha256 \"$DARWIN_AMD64\"| if \$c++ == 1" homebrew-boltdb/Formula/boltdb.rb
+          perl -i -pe "s|sha256 \".*\"|sha256 \"$LINUX_ARM64\"| if \$c++ == 2" homebrew-boltdb/Formula/boltdb.rb
+          perl -i -pe "s|sha256 \".*\"|sha256 \"$LINUX_AMD64\"| if \$c++ == 3" homebrew-boltdb/Formula/boltdb.rb
 
           cat homebrew-boltdb/Formula/boltdb.rb
 
