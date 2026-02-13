@@ -106,7 +106,7 @@ jobs:
       - name: Install fpm
         run: gem install fpm
 
-      - name: Build .deb package
+      - name: Build .deb and .rpm packages
         run: |
           # Create temporary directory for package
           mkdir -p pkg/boltDB/usr/bin
@@ -117,17 +117,29 @@ jobs:
           cp boltDB-${VERSION}-linux-amd64 pkg/boltDB/usr/bin/boltdb
           chmod 755 pkg/boltDB/usr/bin/boltdb
 
-          # Create control file
+          # Create control file for deb
           mkdir -p pkg/boltDB/DEBIAN
           printf 'Package: boltdb\nVersion: %s\nSection: database\nPriority: optional\nArchitecture: amd64\nDepends: libc6\nMaintainer: BoltDB Team <lbp@boltdb.dev>\nDescription: Redis-compatible key-value database with 100TB storage\n A high-performance, disk-persistent key-value database.\n.\n' "$VERSION" > pkg/boltDB/DEBIAN/control
 
-          # Create postinst script
-          # Create postinst script
+          # Create postinst script for deb
           printf '#!/bin/sh\ncase "$1" in\n    configure)\n        mkdir -p /var/lib/boltdb\n        ;;\nesac\nexit 0\n' > pkg/boltDB/DEBIAN/postinst
           chmod 755 pkg/boltDB/DEBIAN/postinst
 
           # Build .deb package
           fpm -t deb -C pkg/boltDB -p boltDB_${VERSION}_amd64.deb .
+
+          # Build .rpm package
+          fpm -t rpm -C pkg/boltDB -p boltDB-${VERSION}-1.x86_64.rpm \
+            --name boltdb \
+            --version "$VERSION" \
+            --release 1 \
+            --epoch 0 \
+            --description "Redis-compatible key-value database with 100TB storage" \
+            --url "https://github.com/lbp0200/BoltDB" \
+            --vendor "BoltDB" \
+            --category "Database" \
+            --license "MIT" \
+            .
 
       - name: Upload Release Assets
         uses: softprops/action-gh-release@v2
@@ -140,6 +152,7 @@ jobs:
             boltDB-${{ env.VERSION }}-windows-amd64.exe
             boltDB-${{ env.VERSION }}-checksums.txt
             boltDB_${{ env.VERSION }}_amd64.deb
+            boltDB-{{ env.VERSION }}-1.x86_64.rpm
           generate_release_notes: true
           name: Release ${{ env.VERSION }}
           draft: false
