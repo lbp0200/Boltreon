@@ -103,6 +103,32 @@ jobs:
           shasum -a 256 boltDB-${VERSION}-* > boltDB-${VERSION}-checksums.txt
           cat boltDB-${VERSION}-checksums.txt
 
+      - name: Install fpm
+        run: gem install fpm
+
+      - name: Build .deb package
+        run: |
+          # Create temporary directory for package
+          mkdir -p pkg/boltDB/usr/bin
+          mkdir -p pkg/boltDB/var/lib/boltdb
+          mkdir -p pkg/boltDB/etc
+
+          # Copy binary
+          cp boltDB-${VERSION}-linux-amd64 pkg/boltDB/usr/bin/boltdb
+          chmod 755 pkg/boltDB/usr/bin/boltdb
+
+          # Create control file
+          mkdir -p pkg/boltDB/DEBIAN
+          printf 'Package: boltdb\nVersion: %s\nSection: database\nPriority: optional\nArchitecture: amd64\nDepends: libc6\nMaintainer: BoltDB Team <lbp@boltdb.dev>\nDescription: Redis-compatible key-value database with 100TB storage\n A high-performance, disk-persistent key-value database.\n.\n' "$VERSION" > pkg/boltDB/DEBIAN/control
+
+          # Create postinst script
+          # Create postinst script
+          printf '#!/bin/sh\ncase "$1" in\n    configure)\n        mkdir -p /var/lib/boltdb\n        ;;\nesac\nexit 0\n' > pkg/boltDB/DEBIAN/postinst
+          chmod 755 pkg/boltDB/DEBIAN/postinst
+
+          # Build .deb package
+          fpm -t deb -C pkg/boltDB -p boltDB_${VERSION}_amd64.deb .
+
       - name: Upload Release Assets
         uses: softprops/action-gh-release@v2
         with:
@@ -113,6 +139,7 @@ jobs:
             boltDB-${{ env.VERSION }}-darwin-arm64
             boltDB-${{ env.VERSION }}-windows-amd64.exe
             boltDB-${{ env.VERSION }}-checksums.txt
+            boltDB_${{ env.VERSION }}_amd64.deb
           generate_release_notes: true
           name: Release ${{ env.VERSION }}
           draft: false
