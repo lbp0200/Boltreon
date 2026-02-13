@@ -106,7 +106,7 @@ jobs:
       - name: Install packaging tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y dpkg-dev
+          sudo apt-get install -y dpkg-dev alien
 
       - name: Build .deb package
         run: |
@@ -129,6 +129,13 @@ jobs:
           # Build .deb package
           dpkg-deb --build pkg/boltDB boltDB_${VERSION}_amd64.deb
 
+      - name: Build .rpm package
+        run: |
+          # Convert .deb to .rpm using alien
+          sudo alien -r --scripts boltDB_${VERSION}_amd64.deb
+          # Rename to follow naming convention
+          mv boltdb-*.rpm boltDB-${VERSION}-1.x86_64.rpm
+
       - name: Upload Release Assets
         uses: softprops/action-gh-release@v2
         with:
@@ -140,6 +147,7 @@ jobs:
             boltDB-${{ env.VERSION }}-windows-amd64.exe
             boltDB-${{ env.VERSION }}-checksums.txt
             boltDB_${{ env.VERSION }}_amd64.deb
+            boltDB-{{ env.VERSION }}-1.x86_64.rpm
           generate_release_notes: true
           name: Release ${{ env.VERSION }}
           draft: false
