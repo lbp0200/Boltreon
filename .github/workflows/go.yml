@@ -103,15 +103,16 @@ jobs:
           shasum -a 256 boltDB-${VERSION}-* > boltDB-${VERSION}-checksums.txt
           cat boltDB-${VERSION}-checksums.txt
 
-      - name: Install fpm
-        run: gem install fpm
+      - name: Install packaging tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y dpkg-dev rpm
 
-      - name: Build .deb and .rpm packages
+      - name: Build .deb package
         run: |
           # Create temporary directory for package
           mkdir -p pkg/boltDB/usr/bin
           mkdir -p pkg/boltDB/var/lib/boltdb
-          mkdir -p pkg/boltDB/etc
 
           # Copy binary
           cp boltDB-${VERSION}-linux-amd64 pkg/boltDB/usr/bin/boltdb
@@ -119,27 +120,34 @@ jobs:
 
           # Create control file for deb
           mkdir -p pkg/boltDB/DEBIAN
-          printf 'Package: boltdb\nVersion: %s\nSection: database\nPriority: optional\nArchitecture: amd64\nDepends: libc6\nMaintainer: BoltDB Team <lbp@boltdb.dev>\nDescription: Redis-compatible key-value database with 100TB storage\n A high-performance, disk-persistent key-value database.\n.\n' "$VERSION" > pkg/boltDB/DEBIAN/control
+          printf 'Package: boltdb\nVersion: %s\nSection: database\nPriority: optional\nArchitecture: amd64\nDepends: libc6\nMaintainer: BoltDB Team <lbp@boltdb.dev>\nDescription: Redis-compatible key-value database with 100TB storage\n A high-performance, disk-persistent key-value database.\n' "$VERSION" > pkg/boltDB/DEBIAN/control
 
           # Create postinst script for deb
           printf '#!/bin/sh\ncase "$1" in\n    configure)\n        mkdir -p /var/lib/boltdb\n        ;;\nesac\nexit 0\n' > pkg/boltDB/DEBIAN/postinst
           chmod 755 pkg/boltDB/DEBIAN/postinst
 
           # Build .deb package
-          fpm -t deb -C pkg/boltDB -p boltDB_${VERSION}_amd64.deb .
+          dpkg-deb --build pkg/boltDB boltDB_${VERSION}_amd64.deb
 
-          # Build .rpm package
-          fpm -t rpm -C pkg/boltDB -p boltDB-${VERSION}-1.x86_64.rpm \
-            --name boltdb \
-            --version "$VERSION" \
-            --release 1 \
-            --epoch 0 \
-            --description "Redis-compatible key-value database with 100TB storage" \
-            --url "https://github.com/lbp0200/BoltDB" \
-            --vendor "BoltDB" \
-            --category "Database" \
-            --license "MIT" \
-            .
+      - name: Build .rpm package
+        run: |
+          # Create directory structure for RPM
+          mkdir -p rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
+          mkdir -p rpmbuild/BUILDROOT/boltdb-${VERSION}-1.x86_64/usr/bin
+
+          # Copy binary
+          cp boltDB-${VERSION}-linux-amd64 rpmbuild/BUILDROOT/boltdb-${VERSION}-1.x86_64/usr/bin/boltdb
+          chmod 755 rpmbuild/BUILDROOT/boltdb-${VERSION}-1.x86_64/usr/bin/boltdb
+
+          # Create RPM spec file
+          printf 'Name: boltdb\nVersion: %s\nRelease: 1%%{?dist}\nSummary: Redis-compatible key-value database with 100TB storage\nLicense: MIT\nURL: https://github.com/lbp0200/BoltDB\nBuildArch: x86_64\n\n%%description\nA high-performance, disk-persistent key-value database.\n\n%%prep\n# Nothing to prep\n\n%%install\nmkdir -p %%{buildroot}/usr/bin\ncp boltDB-%s-linux-amd64 %%{buildroot}/usr/bin/boltdb\n\n%%files\n%%attr(755, root, root) /usr/bin/boltdb\n\n%%post\nmkdir -p /var/lib/boltdb\n\n%%changelog\n- Initial package\n' "$VERSION" "$VERSION" > rpmbuild/SPECS/boltdb.spec
+          sed -i "s/VERSION/$VERSION/g" rpmbuild/SPECS/boltdb.spec
+
+          # Build RPM
+          rpmbuild --define "_topdir $(pwd)/rpmbuild" -bb rpmbuild/SPECS/boltdb.spec
+
+          # Move RPM to current directory
+          mv rpmbuild/RPMS/x86_64/boltdb-${VERSION}-1.x86_64.rpm .
 
       - name: Upload Release Assets
         uses: softprops/action-gh-release@v2
