@@ -11,7 +11,7 @@
 
 ```bash
 # Add the BoltDB tap
-brew tap lbp0200/bolt
+brew tap lbp0200/boltdb
 
 # Install BoltDB
 brew install bolt
