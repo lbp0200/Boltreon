@@ -159,11 +159,11 @@ jobs:
 
           echo "Updating Homebrew formula to version $VERSION_NUM"
 
-          # Download files and calculate SHA256
-          curl -sL "https://github.com/lbp0200/BoltDB/releases/download/$VERSION/boltDB-${VERSION_NUM}-darwin-arm64" -o /tmp/darwin-arm64
-          curl -sL "https://github.com/lbp0200/BoltDB/releases/download/$VERSION/boltDB-${VERSION_NUM}-darwin-amd64" -o /tmp/darwin-amd64
-          curl -sL "https://github.com/lbp0200/BoltDB/releases/download/$VERSION/boltDB-${VERSION_NUM}-linux-arm64" -o /tmp/linux-arm64
-          curl -sL "https://github.com/lbp0200/BoltDB/releases/download/$VERSION/boltDB-${VERSION_NUM}-linux-amd64" -o /tmp/linux-amd64
+          # Download files and calculate SHA256 (use VERSION for download URL)
+          curl -sL "https://github.com/lbp0200/BoltDB/releases/download/$VERSION/boltDB-${VERSION}-darwin-arm64" -o /tmp/darwin-arm64
+          curl -sL "https://github.com/lbp0200/BoltDB/releases/download/$VERSION/boltDB-${VERSION}-darwin-amd64" -o /tmp/darwin-amd64
+          curl -sL "https://github.com/lbp0200/BoltDB/releases/download/$VERSION/boltDB-${VERSION}-linux-arm64" -o /tmp/linux-arm64
+          curl -sL "https://github.com/lbp0200/BoltDB/releases/download/$VERSION/boltDB-${VERSION}-linux-amd64" -o /tmp/linux-amd64
 
           DARWIN_ARM64=$(shasum -a 256 /tmp/darwin-arm64 | awk '{print $1}')
           DARWIN_AMD64=$(shasum -a 256 /tmp/darwin-amd64 | awk '{print $1}')
