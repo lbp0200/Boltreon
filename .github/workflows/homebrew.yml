@@ -58,53 +58,43 @@ jobs:
           echo "LINUX_ARM64=$LINUX_ARM64"
           echo "LINUX_AMD64=$LINUX_AMD64"
 
-          # Write formula file
-          cat > homebrew-boltdb/Formula/boltdb.rb << 'RUBY'
-class Boltdb < Formula
-  desc "Redis-compatible key-value database with 100TB storage"
-  homepage "https://github.com/lbp0200/BoltDB"
-  version "VERSION"
-  license "MIT"
-
-  on_macos do
-    if Hardware::CPU.arm?
-      url "https://github.com/lbp0200/BoltDB/releases/download/TAG/boltDB-VERSION-darwin-arm64"
-      sha256 "SHA256"
-    else
-      url "https://github.com/lbp0200/BoltDB/releases/download/TAG/boltDB-VERSION-darwin-amd64"
-      sha256 "SHA256"
-    end
-  end
-
-  on_linux do
-    if Hardware::CPU.arm?
-      url "https://github.com/lbp0200/BoltDB/releases/download/TAG/boltDB-VERSION-linux-arm64"
-      sha256 "SHA256"
-    else
-      url "https://github.com/lbp0200/BoltDB/releases/download/TAG/boltDB-VERSION-linux-amd64"
-      sha256 "SHA256"
-    end
-  end
-
-  def install
-    arch = Hardware::CPU.arm? ? "arm64" : "amd64"
-    os = OS.mac? ? "darwin" : "linux"
-    bin.install "boltDB-#{version}-#{os}-#{arch}" => "boltdb"
-  end
-
-  test do
-    system "#{bin}/boltdb", "--version"
-  end
-end
-RUBY
-
-          # Replace placeholders
-          sed -i "s/VERSION/$VERSION_NUM/g" homebrew-boltdb/Formula/boltdb.rb
-          sed -i "s/TAG/$VERSION/g" homebrew-boltdb/Formula/boltdb.rb
-          sed -i "0,/SHA256/s/SHA256/$DARWIN_ARM64/" homebrew-boltdb/Formula/boltdb.rb
-          sed -i "0,/SHA256/s/SHA256/$DARWIN_AMD64/" homebrew-boltdb/Formula/boltdb.rb
-          sed -i "0,/SHA256/s/SHA256/$LINUX_ARM64/" homebrew-boltdb/Formula/boltdb.rb
-          sed -i "0,/SHA256/s/SHA256/$LINUX_AMD64/" homebrew-boltdb/Formula/boltdb.rb
+          # Write formula file using multiple echo statements
+          echo 'class Boltdb < Formula' > homebrew-boltdb/Formula/boltdb.rb
+          echo '  desc "Redis-compatible key-value database with 100TB storage"' >> homebrew-boltdb/Formula/boltdb.rb
+          echo '  homepage "https://github.com/lbp0200/BoltDB"' >> homebrew-boltdb/Formula/boltdb.rb
+          echo "  version \"$VERSION_NUM\"" >> homebrew-boltdb/Formula/boltdb.rb
+          echo '  license "MIT"' >> homebrew-boltdb/Formula/boltdb.rb
+          echo '' >> homebrew-boltdb/Formula/boltdb.rb
+          echo '  on_macos do' >> homebrew-boltdb/Formula/boltdb.rb
+          echo '    if Hardware::CPU.arm?' >> homebrew-boltdb/Formula/boltdb.rb
+          echo "      url \"https://github.com/lbp0200/BoltDB/releases/download/$VERSION/boltDB-$VERSION_NUM-darwin-arm64\"" >> homebrew-boltdb/Formula/boltdb.rb
+          echo "      sha256 \"$DARWIN_ARM64\"" >> homebrew-boltdb/Formula/boltdb.rb
+          echo '    else' >> homebrew-boltdb/Formula/boltdb.rb
+          echo "      url \"https://github.com/lbp0200/BoltDB/releases/download/$VERSION/boltDB-$VERSION_NUM-darwin-amd64\"" >> homebrew-boltdb/Formula/boltdb.rb
+          echo "      sha256 \"$DARWIN_AMD64\"" >> homebrew-boltdb/Formula/boltdb.rb
+          echo '    end' >> homebrew-boltdb/Formula/boltdb.rb
+          echo '  end' >> homebrew-boltdb/Formula/boltdb.rb
+          echo '' >> homebrew-boltdb/Formula/boltdb.rb
+          echo '  on_linux do' >> homebrew-boltdb/Formula/boltdb.rb
+          echo '    if Hardware::CPU.arm?' >> homebrew-boltdb/Formula/boltdb.rb
+          echo "      url \"https://github.com/lbp0200/BoltDB/releases/download/$VERSION/boltDB-$VERSION_NUM-linux-arm64\"" >> homebrew-boltdb/Formula/boltdb.rb
+          echo "      sha256 \"$LINUX_ARM64\"" >> homebrew-boltdb/Formula/boltdb.rb
+          echo '    else' >> homebrew-boltdb/Formula/boltdb.rb
+          echo "      url \"https://github.com/lbp0200/BoltDB/releases/download/$VERSION/boltDB-$VERSION_NUM-linux-amd64\"" >> homebrew-boltdb/Formula/boltdb.rb
+          echo "      sha256 \"$LINUX_AMD64\"" >> homebrew-boltdb/Formula/boltdb.rb
+          echo '    end' >> homebrew-boltdb/Formula/boltdb.rb
+          echo '  end' >> homebrew-boltdb/Formula/boltdb.rb
+          echo '' >> homebrew-boltdb/Formula/boltdb.rb
+          echo '  def install' >> homebrew-boltdb/Formula/boltdb.rb
+          echo '    arch = Hardware::CPU.arm? ? "arm64" : "amd64"' >> homebrew-boltdb/Formula/boltdb.rb
+          echo '    os = OS.mac? ? "darwin" : "linux"' >> homebrew-boltdb/Formula/boltdb.rb
+          echo '    bin.install "boltDB-#{version}-#{os}-#{arch}" => "boltdb"' >> homebrew-boltdb/Formula/boltdb.rb
+          echo '  end' >> homebrew-boltdb/Formula/boltdb.rb
+          echo '' >> homebrew-boltdb/Formula/boltdb.rb
+          echo '  test do' >> homebrew-boltdb/Formula/boltdb.rb
+          echo '    system "#{bin}/boltdb", "--version"' >> homebrew-boltdb/Formula/boltdb.rb
+          echo '  end' >> homebrew-boltdb/Formula/boltdb.rb
+          echo 'end' >> homebrew-boltdb/Formula/boltdb.rb
 
           cat homebrew-boltdb/Formula/boltdb.rb
 
