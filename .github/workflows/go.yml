@@ -183,20 +183,20 @@ jobs:
           echo '' >> Formula/boltdb.rb
           echo '  on_macos do' >> Formula/boltdb.rb
           echo '    if Hardware::CPU.arm?' >> Formula/boltdb.rb
-          echo "      url \"https://github.com/lbp0200/BoltDB/releases/download/$VERSION/boltDB-$VERSION_NUM-darwin-arm64\"" >> Formula/boltdb.rb
+          echo "      url \"https://github.com/lbp0200/BoltDB/releases/download/$VERSION/boltDB-$VERSION-darwin-arm64\"" >> Formula/boltdb.rb
           echo "      sha256 \"$DARWIN_ARM64\"" >> Formula/boltdb.rb
           echo '    else' >> Formula/boltdb.rb
-          echo "      url \"https://github.com/lbp0200/BoltDB/releases/download/$VERSION/boltDB-$VERSION_NUM-darwin-amd64\"" >> Formula/boltdb.rb
+          echo "      url \"https://github.com/lbp0200/BoltDB/releases/download/$VERSION/boltDB-$VERSION-darwin-amd64\"" >> Formula/boltdb.rb
           echo "      sha256 \"$DARWIN_AMD64\"" >> Formula/boltdb.rb
           echo '    end' >> Formula/boltdb.rb
           echo '  end' >> Formula/boltdb.rb
           echo '' >> Formula/boltdb.rb
           echo '  on_linux do' >> Formula/boltdb.rb
           echo '    if Hardware::CPU.arm?' >> Formula/boltdb.rb
-          echo "      url \"https://github.com/lbp0200/BoltDB/releases/download/$VERSION/boltDB-$VERSION_NUM-linux-arm64\"" >> Formula/boltdb.rb
+          echo "      url \"https://github.com/lbp0200/BoltDB/releases/download/$VERSION/boltDB-$VERSION-linux-arm64\"" >> Formula/boltdb.rb
           echo "      sha256 \"$LINUX_ARM64\"" >> Formula/boltdb.rb
           echo '    else' >> Formula/boltdb.rb
-          echo "      url \"https://github.com/lbp0200/BoltDB/releases/download/$VERSION/boltDB-$VERSION_NUM-linux-amd64\"" >> Formula/boltdb.rb
+          echo "      url \"https://github.com/lbp0200/BoltDB/releases/download/$VERSION/boltDB-$VERSION-linux-amd64\"" >> Formula/boltdb.rb
           echo "      sha256 \"$LINUX_AMD64\"" >> Formula/boltdb.rb
           echo '    end' >> Formula/boltdb.rb
           echo '  end' >> Formula/boltdb.rb
