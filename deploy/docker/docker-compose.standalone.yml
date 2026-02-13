@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   bolt:
-    image: lbp0200/bolt:latest
+    image: lbp0200/boltdb:latest
     container_name: boltdb
     ports:
       - "6379:6379"

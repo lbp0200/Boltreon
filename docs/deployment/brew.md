@@ -44,6 +44,103 @@ bolt -addr=:6380 -dir=/var/lib/bolt -log-level info
 bolt -cluster -addr=:6379 -dir=/var/lib/bolt
 ```
 
+## Running as a Service (launchd)
+
+### Create Launch Daemon
+
+```bash
+# Create data directory
+sudo mkdir -p /var/lib/bolt
+sudo chown -R $(whoami) /var/lib/bolt
+
+# Create log directory
+sudo mkdir -p /var/log/bolt
+sudo chown -R $(whoami) /var/log/bolt
+```
+
+Create `/Library/LaunchDaemons/com.boltdb.plist`:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.boltdb</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/local/bin/bolt</string>
+        <string>-addr=:6379</string>
+        <string>-dir=/var/lib/bolt</string>
+        <string>-log-level=info</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/var/log/bolt/bolt.log</string>
+    <key>StandardErrorPath</key>
+    <string>/var/log/bolt/bolt.error.log</string>
+    <key>WorkingDirectory</key>
+    <string>/var/lib/bolt</string>
+</dict>
+</plist>
+```
+
+### Manage Service
+
+```bash
+# Load service (start on boot)
+sudo launchctl load /Library/LaunchDaemons/com.boltdb.plist
+
+# Start immediately
+sudo launchctl start com.boltdb
+
+# Stop
+sudo launchctl stop com.boltdb
+
+# Unload (remove from boot)
+sudo launchctl unload /Library/LaunchDaemons/com.boltdb.plist
+
+# Check status
+sudo launchctl list | grep bolt
+
+# View logs
+tail -f /var/log/bolt/bolt.log
+```
+
+### Cluster Mode Service
+
+For cluster mode, use this plist:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.boltdb.cluster</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/local/bin/bolt</string>
+        <string>-cluster</string>
+        <string>-addr=:6379</string>
+        <string>-dir=/var/lib/bolt</string>
+        <string>-log-level=info</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/var/log/bolt/cluster.log</string>
+    <key>StandardErrorPath</key>
+    <string>/var/log/bolt/cluster.error.log</string>
+</dict>
+</plist>
+```
+
 ## Configuration Options
 
 | Flag | Description | Default |

@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   bolt-node1:
-    image: lbp0200/bolt:latest
+    image: lbp0200/boltdb:latest
     container_name: bolt-node1
     ports:
       - "7001:6379"
@@ -14,7 +14,7 @@ services:
       - bolt-cluster
 
   bolt-node2:
-    image: lbp0200/bolt:latest
+    image: lbp0200/boltdb:latest
     container_name: bolt-node2
     ports:
       - "7002:6379"
@@ -26,7 +26,7 @@ services:
       - bolt-cluster
 
   bolt-node3:
-    image: lbp0200/bolt:latest
+    image: lbp0200/boltdb:latest
     container_name: bolt-node3
     ports:
       - "7003:6379"
@@ -39,7 +39,7 @@ services:
 
   # Cluster setup helper (runs once and exits)
   cluster-init:
-    image: lbp0200/bolt:latest
+    image: lbp0200/boltdb:latest
     depends_on:
       - bolt-node1
       - bolt-node2

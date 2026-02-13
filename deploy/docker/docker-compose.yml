@@ -16,7 +16,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: lbp0200/bolt:latest
+    image: lbp0200/boltdb:latest
     container_name: boltdb
     ports:
       - "6379:6379"
@@ -42,7 +42,7 @@ volumes:
 # ============================================
 # services:
 #   bolt:
-#     image: lbp0200/bolt:latest
+#     image: lbp0200/boltdb:latest
 #     ports:
 #       - "6380:6379"
 #     volumes:
@@ -60,7 +60,7 @@ volumes:
 # ============================================
 # services:
 #   bolt-master:
-#     image: lbp0200/bolt:latest
+#     image: lbp0200/boltdb:latest
 #     container_name: bolt-master
 #     ports:
 #       - "6379:6379"
@@ -70,7 +70,7 @@ volumes:
 #     command: ["-addr", ":6379", "-dir", "/data"]
 
 #   bolt-slave:
-#     image: lbp0200/bolt:latest
+#     image: lbp0200/boltdb:latest
 #     container_name: bolt-slave
 #     ports:
 #       - "6380:6379"
@@ -91,7 +91,7 @@ volumes:
 # ============================================
 # services:
 #   bolt-node1:
-#     image: lbp0200/bolt:latest
+#     image: lbp0200/boltdb:latest
 #     container_name: bolt-node1
 #     ports:
 #       - "7001:6379"
@@ -101,7 +101,7 @@ volumes:
 #     command: ["-cluster", "-addr", ":6379", "-dir", "/data"]
 
 #   bolt-node2:
-#     image: lbp0200/bolt:latest
+#     image: lbp0200/boltdb:latest
 #     container_name: bolt-node2
 #     ports:
 #       - "7002:6379"
@@ -111,7 +111,7 @@ volumes:
 #     command: ["-cluster", "-addr", ":6379", "-dir", "/data"]
 
 #   bolt-node3:
-#     image: lbp0200/bolt:latest
+#     image: lbp0200/boltdb:latest
 #     container_name: bolt-node3
 #     ports:
 #       - "7003:6379"
@@ -131,7 +131,7 @@ volumes:
 # ============================================
 # services:
 #   bolt-master:
-#     image: lbp0200/bolt:latest
+#     image: lbp0200/boltdb:latest
 #     container_name: bolt-master
 #     ports:
 #       - "6379:6379"
@@ -143,7 +143,7 @@ volumes:
 #       - bolt-net
 
 #   bolt-slave:
-#     image: lbp0200/bolt:latest
+#     image: lbp0200/boltdb:latest
 #     container_name: bolt-slave
 #     ports:
 #       - "6380:6379"
