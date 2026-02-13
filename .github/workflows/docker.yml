@@ -3,7 +3,7 @@ name: Docker Build and Push
 on:
   push:
     tags:
-      - 'v*'
+      - "v*"
 
 jobs:
   docker:
@@ -25,7 +25,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: lbp0200/bolt
+          images: lbp0200/boltdb
           tags: |
             type=ref,event=tag
             type=sha
