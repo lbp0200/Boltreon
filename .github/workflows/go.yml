@@ -147,6 +147,73 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Update Homebrew Formula
+        run: |
+          VERSION=${{ env.VERSION }}
+          VERSION_NUM=${VERSION#v}
+
+          echo "Updating Homebrew formula to version $VERSION_NUM"
+
+          # Download files and calculate SHA256
+          curl -sL "https://github.com/lbp0200/BoltDB/releases/download/$VERSION/boltDB-${VERSION_NUM}-darwin-arm64" -o /tmp/darwin-arm64
+          curl -sL "https://github.com/lbp0200/BoltDB/releases/download/$VERSION/boltDB-${VERSION_NUM}-darwin-amd64" -o /tmp/darwin-amd64
+          curl -sL "https://github.com/lbp0200/BoltDB/releases/download/$VERSION/boltDB-${VERSION_NUM}-linux-arm64" -o /tmp/linux-arm64
+          curl -sL "https://github.com/lbp0200/BoltDB/releases/download/$VERSION/boltDB-${VERSION_NUM}-linux-amd64" -o /tmp/linux-amd64
+
+          DARWIN_ARM64=$(shasum -a 256 /tmp/darwin-arm64 | awk '{print $1}')
+          DARWIN_AMD64=$(shasum -a 256 /tmp/darwin-amd64 | awk '{print $1}')
+          LINUX_ARM64=$(shasum -a 256 /tmp/linux-arm64 | awk '{print $1}')
+          LINUX_AMD64=$(shasum -a 256 /tmp/linux-amd64 | awk '{print $1}')
+
+          # Clone homebrew formula repo
+          git clone https://github.com/lbp0200/homebrew-boltdb.git /tmp/homebrew-boltdb
+
+          # Write formula file
+          cd /tmp/homebrew-boltdb
+          echo 'class Boltdb < Formula' > Formula/boltdb.rb
+          echo '  desc "Redis-compatible key-value database with 100TB storage"' >> Formula/boltdb.rb
+          echo '  homepage "https://github.com/lbp0200/BoltDB"' >> Formula/boltdb.rb
+          echo "  version \"$VERSION_NUM\"" >> Formula/boltdb.rb
+          echo '  license "MIT"' >> Formula/boltdb.rb
+          echo '' >> Formula/boltdb.rb
+          echo '  on_macos do' >> Formula/boltdb.rb
+          echo '    if Hardware::CPU.arm?' >> Formula/boltdb.rb
+          echo "      url \"https://github.com/lbp0200/BoltDB/releases/download/$VERSION/boltDB-$VERSION_NUM-darwin-arm64\"" >> Formula/boltdb.rb
+          echo "      sha256 \"$DARWIN_ARM64\"" >> Formula/boltdb.rb
+          echo '    else' >> Formula/boltdb.rb
+          echo "      url \"https://github.com/lbp0200/BoltDB/releases/download/$VERSION/boltDB-$VERSION_NUM-darwin-amd64\"" >> Formula/boltdb.rb
+          echo "      sha256 \"$DARWIN_AMD64\"" >> Formula/boltdb.rb
+          echo '    end' >> Formula/boltdb.rb
+          echo '  end' >> Formula/boltdb.rb
+          echo '' >> Formula/boltdb.rb
+          echo '  on_linux do' >> Formula/boltdb.rb
+          echo '    if Hardware::CPU.arm?' >> Formula/boltdb.rb
+          echo "      url \"https://github.com/lbp0200/BoltDB/releases/download/$VERSION/boltDB-$VERSION_NUM-linux-arm64\"" >> Formula/boltdb.rb
+          echo "      sha256 \"$LINUX_ARM64\"" >> Formula/boltdb.rb
+          echo '    else' >> Formula/boltdb.rb
+          echo "      url \"https://github.com/lbp0200/BoltDB/releases/download/$VERSION/boltDB-$VERSION_NUM-linux-amd64\"" >> Formula/boltdb.rb
+          echo "      sha256 \"$LINUX_AMD64\"" >> Formula/boltdb.rb
+          echo '    end' >> Formula/boltdb.rb
+          echo '  end' >> Formula/boltdb.rb
+          echo '' >> Formula/boltdb.rb
+          echo '  def install' >> Formula/boltdb.rb
+          echo '    arch = Hardware::CPU.arm? ? "arm64" : "amd64"' >> Formula/boltdb.rb
+          echo '    os = OS.mac? ? "darwin" : "linux"' >> Formula/boltdb.rb
+          echo '    bin.install "boltDB-#{version}-#{os}-#{arch}" => "boltdb"' >> Formula/boltdb.rb
+          echo '  end' >> Formula/boltdb.rb
+          echo '' >> Formula/boltdb.rb
+          echo '  test do' >> Formula/boltdb.rb
+          echo '    system "#{bin}/boltdb", "--version"' >> Formula/boltdb.rb
+          echo '  end' >> Formula/boltdb.rb
+          echo 'end' >> Formula/boltdb.rb
+
+          # Commit and push
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          git add Formula/boltdb.rb
+          git commit -m "Update BoltDB to $VERSION"
+          git push
+
   lint:
     runs-on: ubuntu-latest
     permissions:
