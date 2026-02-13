@@ -106,7 +106,13 @@ jobs:
       - name: Upload Release Assets
         uses: softprops/action-gh-release@v2
         with:
-          files: boltDB-$VERSION-*
+          files: |
+            boltDB-${{ env.VERSION }}-linux-amd64
+            boltDB-${{ env.VERSION }}-linux-arm64
+            boltDB-${{ env.VERSION }}-darwin-amd64
+            boltDB-${{ env.VERSION }}-darwin-arm64
+            boltDB-${{ env.VERSION }}-windows-amd64.exe
+            boltDB-${{ env.VERSION }}-checksums.txt
           generate_release_notes: true
           name: Release ${{ env.VERSION }}
           draft: false
