@@ -1,0 +1,70 @@
+name: Update Homebrew Formula
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  update-homebrew:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout homebrew formula
+        uses: actions/checkout@v4
+        with:
+          repository: lbp0200/homebrew-boltdb
+          token: ${{ secrets.HOMEBREW_TOKEN }}
+          path: homebrew-boltdb
+
+      - name: Download and calculate SHA256
+        run: |
+          VERSION=${{ github.event.release.tag_name }}
+
+          for file in boltDB-${VERSION#v}-darwin-arm64 \
+                      boltDB-${VERSION#v}-darwin-amd64 \
+                      boltDB-${VERSION#v}-linux-arm64 \
+                      boltDB-${VERSION#v}-linux-amd64; do
+            echo "Downloading $file..."
+            curl -sL "https://github.com/lbp0200/BoltDB/releases/download/$VERSION/$file" -o "/tmp/$file"
+            echo "$file SHA256:"
+            shasum -a 256 "/tmp/$file"
+          done
+
+      - name: Update formula
+        run: |
+          VERSION=${{ github.event.release.tag_name }}
+          VERSION_NUM=${VERSION#v}
+
+          # Calculate SHA256 for each platform
+          DARWIN_ARM64=$(shasum -a 256 /tmp/boltDB-${VERSION_NUM}-darwin-arm64 | awk '{print $1}')
+          DARWIN_AMD64=$(shasum -a 256 /tmp/boltDB-${VERSION_NUM}-darwin-amd64 | awk '{print $1}')
+          LINUX_ARM64=$(shasum -a 256 /tmp/boltDB-${VERSION_NUM}-linux-arm64 | awk '{print $1}')
+          LINUX_AMD64=$(shasum -a 256 /tmp/boltDB-${VERSION_NUM}-linux-amd64 | awk '{print $1}')
+
+          # Update version
+          sed -i "s/version \".*\"/version \"$VERSION_NUM\"/" homebrew-boltdb/Formula/boltdb.rb
+
+          # Update SHA256 for darwin-arm64
+          sed -i "0,/sha256 \".*\"$/s//sha256 \"$DARWIN_ARM64\"/" homebrew-boltdb/Formula/boltdb.rb
+
+          # Update SHA256 for darwin-amd64 (second occurrence)
+          sed -i "0,/sha256 \".*\"$/s//sha256 \"$DARWIN_AMD64\"/" homebrew-boltdb/Formula/boltdb.rb
+
+          # Update SHA256 for linux-arm64 (third occurrence)
+          sed -i "0,/sha256 \".*\"$/s//sha256 \"$LINUX_ARM64\"/" homebrew-boltdb/Formula/boltdb.rb
+
+          # Update SHA256 for linux-amd64 (fourth occurrence)
+          sed -i "0,/sha256 \".*\"$/s//sha256 \"$LINUX_AMD64\"/" homebrew-boltdb/Formula/boltdb.rb
+
+          cat homebrew-boltdb/Formula/boltdb.rb
+
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.HOMEBREW_TOKEN }}
+          commit-message: "Update BoltDB to ${{ github.event.release.tag_name }}"
+          title: "Update BoltDB to ${{ github.event.release.tag_name }}"
+          body: |
+            Automated update of BoltDB Homebrew formula to ${{ github.event.release.tag_name }}.
+          branch: update-boltdb
+          delete-branch: true
+          repository: lbp0200/homebrew-boltdb
