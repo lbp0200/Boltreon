@@ -109,18 +109,18 @@ jobs:
 
       - name: Calculate checksums
         run: |
-          shasum -a 256 boltDB-*-${VERSION}-* > boltDB-${VERSION}-checksums.txt
+          shasum -a 256 boltDB-${VERSION}-* > boltDB-${VERSION}-checksums.txt
           cat boltDB-${VERSION}-checksums.txt
 
       - name: Upload Release Assets
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            boltDB-*-${VERSION}-linux-amd64
-            boltDB-*-${VERSION}-linux-arm64
-            boltDB-*-${VERSION}-darwin-amd64
-            boltDB-*-${VERSION}-darwin-arm64
-            boltDB-*-${VERSION}-windows-amd64.exe
+            boltDB-${VERSION}-linux-amd64
+            boltDB-${VERSION}-linux-arm64
+            boltDB-${VERSION}-darwin-amd64
+            boltDB-${VERSION}-darwin-arm64
+            boltDB-${VERSION}-windows-amd64.exe
             boltDB-${VERSION}-checksums.txt
           generate_release_notes: true
           name: Release ${{ env.VERSION }}
