@@ -140,8 +140,32 @@ jobs:
           chmod 755 rpmbuild/BUILDROOT/boltdb-${VERSION}-1.x86_64/usr/bin/boltdb
 
           # Create RPM spec file
-          printf 'Name: boltdb\nVersion: %s\nRelease: 1%%{?dist}\nSummary: Redis-compatible key-value database with 100TB storage\nLicense: MIT\nURL: https://github.com/lbp0200/BoltDB\nBuildArch: x86_64\n\n%%description\nA high-performance, disk-persistent key-value database.\n\n%%prep\n# Nothing to prep\n\n%%install\nmkdir -p %%{buildroot}/usr/bin\ncp boltDB-%s-linux-amd64 %%{buildroot}/usr/bin/boltdb\n\n%%files\n%%attr(755, root, root) /usr/bin/boltdb\n\n%%post\nmkdir -p /var/lib/boltdb\n\n%%changelog\n- Initial package\n' "$VERSION" "$VERSION" > rpmbuild/SPECS/boltdb.spec
-          sed -i "s/VERSION/$VERSION/g" rpmbuild/SPECS/boltdb.spec
+          echo 'Name: boltdb' > rpmbuild/SPECS/boltdb.spec
+          echo "Version: $VERSION" >> rpmbuild/SPECS/boltdb.spec
+          echo 'Release: 1%{?dist}' >> rpmbuild/SPECS/boltdb.spec
+          echo 'Summary: Redis-compatible key-value database with 100TB storage' >> rpmbuild/SPECS/boltdb.spec
+          echo 'License: MIT' >> rpmbuild/SPECS/boltdb.spec
+          echo 'URL: https://github.com/lbp0200/BoltDB' >> rpmbuild/SPECS/boltdb.spec
+          echo 'BuildArch: x86_64' >> rpmbuild/SPECS/boltdb.spec
+          echo '' >> rpmbuild/SPECS/boltdb.spec
+          echo '%description' >> rpmbuild/SPECS/boltdb.spec
+          echo 'A high-performance, disk-persistent key-value database.' >> rpmbuild/SPECS/boltdb.spec
+          echo '' >> rpmbuild/SPECS/boltdb.spec
+          echo '%prep' >> rpmbuild/SPECS/boltdb.spec
+          echo '# Nothing to prep' >> rpmbuild/SPECS/boltdb.spec
+          echo '' >> rpmbuild/SPECS/boltdb.spec
+          echo '%install' >> rpmbuild/SPECS/boltdb.spec
+          echo 'mkdir -p %{buildroot}/usr/bin' >> rpmbuild/SPECS/boltdb.spec
+          echo "cp boltDB-$VERSION-linux-amd64 %{buildroot}/usr/bin/boltdb" >> rpmbuild/SPECS/boltdb.spec
+          echo '' >> rpmbuild/SPECS/boltdb.spec
+          echo '%files' >> rpmbuild/SPECS/boltdb.spec
+          echo '%attr(755, root, root) /usr/bin/boltdb' >> rpmbuild/SPECS/boltdb.spec
+          echo '' >> rpmbuild/SPECS/boltdb.spec
+          echo '%post' >> rpmbuild/SPECS/boltdb.spec
+          echo 'mkdir -p /var/lib/boltdb' >> rpmbuild/SPECS/boltdb.spec
+          echo '' >> rpmbuild/SPECS/boltdb.spec
+          echo '%changelog' >> rpmbuild/SPECS/boltdb.spec
+          echo '- Initial package' >> rpmbuild/SPECS/boltdb.spec
 
           # Build RPM
           rpmbuild --define "_topdir $(pwd)/rpmbuild" -bb rpmbuild/SPECS/boltdb.spec
