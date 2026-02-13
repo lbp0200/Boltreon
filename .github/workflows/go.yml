@@ -84,7 +84,7 @@ jobs:
           cache: true
 
       - name: Create version variable
-        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_ENV
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
 
       - name: Build binaries
         run: |
