@@ -115,7 +115,12 @@ func (c *LRUCache) updateAccessOrder(key string) {
 	// 从当前位置删除
 	for i, k := range c.accessOrder {
 		if k == key {
-			c.accessOrder = append(c.accessOrder[:i], c.accessOrder[i+1:]...)
+			// 安全地删除元素
+			if i < len(c.accessOrder)-1 {
+				c.accessOrder = append(c.accessOrder[:i], c.accessOrder[i+1:]...)
+			} else {
+				c.accessOrder = c.accessOrder[:i]
+			}
 			break
 		}
 	}

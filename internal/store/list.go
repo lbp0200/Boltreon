@@ -1,6 +1,7 @@
 package store
 
 import (
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"strings"
@@ -11,6 +12,39 @@ import (
 	"github.com/dgraph-io/badger/v4"
 	"github.com/google/uuid"
 )
+
+// randomFloat64List 生成 [0, 1) 范围的随机浮点数
+func randomFloat64List() float64 {
+	b := make([]byte, 8)
+	_, _ = rand.Read(b)
+	return float64(b[0]) / 256
+}
+
+// retryUpdateList 重试执行 BadgerDB Update 操作，处理事务冲突
+func (s *BotreonStore) retryUpdateList(fn func(*badger.Txn) error, maxRetries int) error {
+	var err error
+	for i := 0; i < maxRetries; i++ {
+		err = s.db.Update(fn)
+		if err == nil {
+			return nil
+		}
+		errStr := err.Error()
+		if strings.Contains(errStr, "Transaction Conflict") ||
+			strings.Contains(errStr, "conflict") ||
+			strings.Contains(errStr, "Conflict") {
+			baseBackoff := time.Duration(1<<uint(i)) * time.Millisecond
+			if baseBackoff > 50*time.Millisecond {
+				baseBackoff = 50 * time.Millisecond
+			}
+			jitter := time.Duration(randomFloat64List() * float64(baseBackoff) * 0.5)
+			backoff := baseBackoff + jitter
+			time.Sleep(backoff)
+			continue
+		}
+		return err
+	}
+	return err
+}
 
 // ListNode 结构体定义了链表节点的结构
 // ID 是节点的唯一标识符，使用字符串存储
@@ -135,7 +169,7 @@ func (s *BotreonStore) linkNodes(txn *badger.Txn, key string, prevID, nextID str
 // LPush Redis LPUSH 实现
 func (s *BotreonStore) LPush(key string, values ...string) (int, error) {
 	var finalLength uint64
-	err := s.db.Update(func(txn *badger.Txn) error {
+	err := s.retryUpdateList(func(txn *badger.Txn) error {
 		if err := txn.Set(TypeOfKeyGet(key), []byte(KeyTypeList)); err != nil {
 			return err
 		}
@@ -171,7 +205,7 @@ func (s *BotreonStore) LPush(key string, values ...string) (int, error) {
 		// 更新元数据
 		finalLength = length
 		return s.listUpdateMeta(txn, key, length, start, end)
-	})
+	}, 10)
 	// #nosec G115 - length is bounded by practical list size limits
 
 	// Notify blocking pop waiters
@@ -327,7 +361,7 @@ func (s *BotreonStore) getNodeByIndex(txn *badger.Txn, key string, index int64) 
 // RPUSH 实现 Redis RPUSH 命令
 func (s *BotreonStore) RPush(key string, values ...string) (int, error) {
 	var finalLength uint64
-	err := s.db.Update(func(txn *badger.Txn) error {
+	err := s.retryUpdateList(func(txn *badger.Txn) error {
 		if err := txn.Set(TypeOfKeyGet(key), []byte(KeyTypeList)); err != nil {
 			return err
 		}
@@ -363,7 +397,7 @@ func (s *BotreonStore) RPush(key string, values ...string) (int, error) {
 		// 更新元数据
 		finalLength = length
 		return s.listUpdateMeta(txn, key, length, start, end)
-	})
+	}, 10)
 	// #nosec G115 - length is bounded by practical list size limits
 
 	// Notify blocking pop waiters
