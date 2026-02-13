@@ -46,11 +46,30 @@ jobs:
 
           echo "Updating to version: $VERSION_NUM"
 
-          # Download files
-          curl -sL "https://github.com/lbp0200/BoltDB/releases/download/$VERSION/boltDB-${VERSION_NUM}-darwin-arm64" -o /tmp/darwin-arm64
-          curl -sL "https://github.com/lbp0200/BoltDB/releases/download/$VERSION/boltDB-${VERSION_NUM}-darwin-amd64" -o /tmp/darwin-amd64
-          curl -sL "https://github.com/lbp0200/BoltDB/releases/download/$VERSION/boltDB-${VERSION_NUM}-linux-arm64" -o /tmp/linux-arm64
-          curl -sL "https://github.com/lbp0200/BoltDB/releases/download/$VERSION/boltDB-${VERSION_NUM}-linux-amd64" -o /tmp/linux-amd64
+          # Download files with error checking
+          HTTP_CODE=$(curl -sL -w "%{http_code}" -o /tmp/darwin-arm64 "https://github.com/lbp0200/BoltDB/releases/download/$VERSION/boltDB-${VERSION_NUM}-darwin-arm64")
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "Failed to download darwin-arm64: HTTP $HTTP_CODE"
+            exit 1
+          fi
+
+          HTTP_CODE=$(curl -sL -w "%{http_code}" -o /tmp/darwin-amd64 "https://github.com/lbp0200/BoltDB/releases/download/$VERSION/boltDB-${VERSION_NUM}-darwin-amd64")
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "Failed to download darwin-amd64: HTTP $HTTP_CODE"
+            exit 1
+          fi
+
+          HTTP_CODE=$(curl -sL -w "%{http_code}" -o /tmp/linux-arm64 "https://github.com/lbp0200/BoltDB/releases/download/$VERSION/boltDB-${VERSION_NUM}-linux-arm64")
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "Failed to download linux-arm64: HTTP $HTTP_CODE"
+            exit 1
+          fi
+
+          HTTP_CODE=$(curl -sL -w "%{http_code}" -o /tmp/linux-amd64 "https://github.com/lbp0200/BoltDB/releases/download/$VERSION/boltDB-${VERSION_NUM}-linux-amd64")
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "Failed to download linux-amd64: HTTP $HTTP_CODE"
+            exit 1
+          fi
 
           # Calculate SHA256
           DARWIN_ARM64=$(shasum -a 256 /tmp/darwin-arm64 | awk '{print $1}')
