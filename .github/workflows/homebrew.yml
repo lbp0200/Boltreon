@@ -63,14 +63,45 @@ jobs:
           LINUX_ARM64=$(shasum -a 256 /tmp/boltDB-${VERSION_NUM}-linux-arm64 | awk '{print $1}')
           LINUX_AMD64=$(shasum -a 256 /tmp/boltDB-${VERSION_NUM}-linux-amd64 | awk '{print $1}')
 
-          # Update version
-          sed -i "s/version \".*\"/version \"$VERSION_NUM\"/" homebrew-boltdb/Formula/boltdb.rb
+          # Write new formula file
+          cat > homebrew-boltdb/Formula/boltdb.rb << EOF
+class Boltdb < Formula
+  desc "Redis-compatible key-value database with 100TB storage"
+  homepage "https://github.com/lbp0200/BoltDB"
+  version "$VERSION_NUM"
+  license "MIT"
 
-          # Update all SHA256 hashes at once using perl
-          perl -i -pe "s|sha256 \".*\"|sha256 \"$DARWIN_ARM64\"| if \$c++ == 0" homebrew-boltdb/Formula/boltdb.rb
-          perl -i -pe "s|sha256 \".*\"|sha256 \"$DARWIN_AMD64\"| if \$c++ == 1" homebrew-boltdb/Formula/boltdb.rb
-          perl -i -pe "s|sha256 \".*\"|sha256 \"$LINUX_ARM64\"| if \$c++ == 2" homebrew-boltdb/Formula/boltdb.rb
-          perl -i -pe "s|sha256 \".*\"|sha256 \"$LINUX_AMD64\"| if \$c++ == 3" homebrew-boltdb/Formula/boltdb.rb
+  on_macos do
+    if Hardware::CPU.arm?
+      url "https://github.com/lbp0200/BoltDB/releases/download/$VERSION/boltDB-$VERSION_NUM-darwin-arm64"
+      sha256 "$DARWIN_ARM64"
+    else
+      url "https://github.com/lbp0200/BoltDB/releases/download/$VERSION/boltDB-$VERSION_NUM-darwin-amd64"
+      sha256 "$DARWIN_AMD64"
+    end
+  end
+
+  on_linux do
+    if Hardware::CPU.arm?
+      url "https://github.com/lbp0200/BoltDB/releases/download/$VERSION/boltDB-$VERSION_NUM-linux-arm64"
+      sha256 "$LINUX_ARM64"
+    else
+      url "https://github.com/lbp0200/BoltDB/releases/download/$VERSION/boltDB-$VERSION_NUM-linux-amd64"
+      sha256 "$LINUX_AMD64"
+    end
+  end
+
+  def install
+    arch = Hardware::CPU.arm? ? "arm64" : "amd64"
+    os = OS.mac? ? "darwin" : "linux"
+    bin.install "boltDB-$VERSION_NUM-\${os}-\${arch}" => "boltdb"
+  end
+
+  test do
+    system "#{bin}/boltdb", "--version"
+  end
+end
+EOF
 
           cat homebrew-boltdb/Formula/boltdb.rb
 
