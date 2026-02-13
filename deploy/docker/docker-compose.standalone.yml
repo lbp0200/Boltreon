@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  bolt:
+    image: lbp0200/bolt:latest
+    container_name: boltdb
+    ports:
+      - "6379:6379"
+    volumes:
+      - bolt-data:/data
+    restart: unless-stopped
+    environment:
+      - BOLTDB_LOG_LEVEL=info
+    command: ["-addr", ":6379", "-dir", "/data", "-log-level", "info"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "6379", "PING"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+
+volumes:
+  bolt-data:

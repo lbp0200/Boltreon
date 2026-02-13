@@ -1,0 +1,53 @@
+version: '3.8'
+
+services:
+  bolt-master:
+    image: lbp0200/bolt:latest
+    container_name: bolt-master
+    ports:
+      - "6379:6379"
+    volumes:
+      - master-data:/data
+    restart: unless-stopped
+    command: ["-addr", ":6379", "-dir", "/data"]
+    networks:
+      - bolt-ha
+
+  bolt-slave:
+    image: lbp0200/bolt:latest
+    container_name: bolt-slave
+    ports:
+      - "6380:6379"
+    volumes:
+      - slave-data:/data
+    restart: unless-stopped
+    depends_on:
+      - bolt-master
+    command: ["-addr", ":6379", "-dir", "/data", "-replicaof", "bolt-master", "6379"]
+    networks:
+      - bolt-ha
+
+  redis-sentinel:
+    image: redis:7-alpine
+    container_name: redis-sentinel
+    ports:
+      - "26379:26379"
+    volumes:
+      - ./sentinel.conf:/usr/local/etc/redis/sentinel.conf
+      - sentinel-data:/data
+    command: redis-sentinel /usr/local/etc/redis/sentinel.conf
+    depends_on:
+      - bolt-master
+      - bolt-slave
+    restart: unless-stopped
+    networks:
+      - bolt-ha
+
+networks:
+  bolt-ha:
+    driver: bridge
+
+volumes:
+  master-data:
+  slave-data:
+  sentinel-data:

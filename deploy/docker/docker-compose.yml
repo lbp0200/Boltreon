@@ -1,0 +1,179 @@
+version: '3.8'
+
+# BoltDB Docker Compose Examples
+# Usage:
+#   Build image: docker-compose build
+#   Standalone:  docker-compose -f docker-compose.yml -f docker-compose.standalone.yml up -d
+#   Master-Slave: docker-compose -f docker-compose.yml -f docker-compose.master-slave.yml up -d
+#   Cluster:     docker-compose -f docker-compose.yml -f docker-compose.cluster.yml up -d
+#   Sentinel:    docker-compose -f docker-compose.yml -f docker-compose.sentinel.yml up -d
+
+# ============================================
+# Example 1: Standalone
+# ============================================
+services:
+  bolt:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: lbp0200/bolt:latest
+    container_name: boltdb
+    ports:
+      - "6379:6379"
+    volumes:
+      - bolt-data:/data
+    restart: unless-stopped
+    environment:
+      - BOLTDB_LOG_LEVEL=info
+    command: ["-addr", ":6379", "-dir", "/data", "-log-level", "info"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "6379", "PING"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+
+volumes:
+  bolt-data:
+
+# ============================================
+# Example 2: Standalone with custom config
+# To use: docker-compose -f docker-compose.yml -f docker-compose.standalone.yml up -d
+# ============================================
+# services:
+#   bolt:
+#     image: lbp0200/bolt:latest
+#     ports:
+#       - "6380:6379"
+#     volumes:
+#       - bolt-data:/data
+#     environment:
+#       - BOLTDB_LOG_LEVEL=debug
+#     command: ["-addr", ":6379", "-dir", "/data", "-log-level", "debug"]
+
+# volumes:
+#   bolt-data:
+
+# ============================================
+# Example 3: Master-Slave Replication
+# To use: docker-compose -f docker-compose.yml -f docker-compose.master-slave.yml up -d
+# ============================================
+# services:
+#   bolt-master:
+#     image: lbp0200/bolt:latest
+#     container_name: bolt-master
+#     ports:
+#       - "6379:6379"
+#     volumes:
+#       - master-data:/data
+#     restart: unless-stopped
+#     command: ["-addr", ":6379", "-dir", "/data"]
+
+#   bolt-slave:
+#     image: lbp0200/bolt:latest
+#     container_name: bolt-slave
+#     ports:
+#       - "6380:6379"
+#     volumes:
+#       - slave-data:/data
+#     restart: unless-stopped
+#     depends_on:
+#       - bolt-master
+#     command: ["-addr", ":6379", "-dir", "/data", "-replicaof", "bolt-master", "6379"]
+
+# volumes:
+#   master-data:
+#   slave-data:
+
+# ============================================
+# Example 4: Cluster Mode (3 nodes)
+# To use: docker-compose -f docker-compose.yml -f docker-compose.cluster.yml up -d
+# ============================================
+# services:
+#   bolt-node1:
+#     image: lbp0200/bolt:latest
+#     container_name: bolt-node1
+#     ports:
+#       - "7001:6379"
+#     volumes:
+#       - node1-data:/data
+#     restart: unless-stopped
+#     command: ["-cluster", "-addr", ":6379", "-dir", "/data"]
+
+#   bolt-node2:
+#     image: lbp0200/bolt:latest
+#     container_name: bolt-node2
+#     ports:
+#       - "7002:6379"
+#     volumes:
+#       - node2-data:/data
+#     restart: unless-stopped
+#     command: ["-cluster", "-addr", ":6379", "-dir", "/data"]
+
+#   bolt-node3:
+#     image: lbp0200/bolt:latest
+#     container_name: bolt-node3
+#     ports:
+#       - "7003:6379"
+#     volumes:
+#       - node3-data:/data
+#     restart: unless-stopped
+#     command: ["-cluster", "-addr", ":6379", "-dir", "/data"]
+
+# volumes:
+#   node1-data:
+#   node2-data:
+#   node3-data:
+
+# ============================================
+# Example 5: High Availability with Redis Sentinel
+# To use: docker-compose -f docker-compose.yml -f docker-compose.sentinel.yml up -d
+# ============================================
+# services:
+#   bolt-master:
+#     image: lbp0200/bolt:latest
+#     container_name: bolt-master
+#     ports:
+#       - "6379:6379"
+#     volumes:
+#       - master-data:/data
+#     restart: unless-stopped
+#     command: ["-addr", ":6379", "-dir", "/data"]
+#     networks:
+#       - bolt-net
+
+#   bolt-slave:
+#     image: lbp0200/bolt:latest
+#     container_name: bolt-slave
+#     ports:
+#       - "6380:6379"
+#     volumes:
+#       - slave-data:/data
+#     restart: unless-stopped
+#     depends_on:
+#       - bolt-master
+#     command: ["-addr", ":6379", "-dir", "/data", "-replicaof", "bolt-master", "6379"]
+#     networks:
+#       - bolt-net
+
+#   redis-sentinel:
+#     image: redis:7-alpine
+#     container_name: redis-sentinel
+#     ports:
+#       - "26379:26379"
+#     volumes:
+#       - ./sentinel.conf:/usr/local/etc/redis/sentinel.conf
+#     command: redis-sentinel /usr/local/etc/redis/sentinel.conf
+#     depends_on:
+#       - bolt-master
+#       - bolt-slave
+#     restart: unless-stopped
+#     networks:
+#       - bolt-net
+
+# networks:
+#   bolt-net:
+
+# volumes:
+#   master-data:
+#   slave-data:

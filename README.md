@@ -272,7 +272,7 @@ redis-cli -p 6380 SET test "hello"
 redis-cli -p 6379 GET test  # Returns "hello"
 ```
 
-> ⚠️ **Note**: BoltDB cannot act as a replica of Redis (SLAVEOF command not implemented).
+> ⚠️ **Note**: BoltDB can act as a replica using `REPLICAOF` command.
 
 ### Sentinel Mode | 哨兵模式
 

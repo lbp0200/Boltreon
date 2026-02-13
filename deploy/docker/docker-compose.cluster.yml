@@ -1,0 +1,70 @@
+version: '3.8'
+
+services:
+  bolt-node1:
+    image: lbp0200/bolt:latest
+    container_name: bolt-node1
+    ports:
+      - "7001:6379"
+    volumes:
+      - node1-data:/data
+    restart: unless-stopped
+    command: ["-cluster", "-addr", ":6379", "-dir", "/data"]
+    networks:
+      - bolt-cluster
+
+  bolt-node2:
+    image: lbp0200/bolt:latest
+    container_name: bolt-node2
+    ports:
+      - "7002:6379"
+    volumes:
+      - node2-data:/data
+    restart: unless-stopped
+    command: ["-cluster", "-addr", ":6379", "-dir", "/data"]
+    networks:
+      - bolt-cluster
+
+  bolt-node3:
+    image: lbp0200/bolt:latest
+    container_name: bolt-node3
+    ports:
+      - "7003:6379"
+    volumes:
+      - node3-data:/data
+    restart: unless-stopped
+    command: ["-cluster", "-addr", ":6379", "-dir", "/data"]
+    networks:
+      - bolt-cluster
+
+  # Cluster setup helper (runs once and exits)
+  cluster-init:
+    image: lbp0200/bolt:latest
+    depends_on:
+      - bolt-node1
+      - bolt-node2
+      - bolt-node3
+    networks:
+      - bolt-cluster
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        echo "Waiting for nodes to be ready..."
+        sleep 5
+        echo "Connecting nodes..."
+        redis-cli -p 7002 CLUSTER MEET 172.18.0.2 6379
+        redis-cli -p 7003 CLUSTER MEET 172.18.0.2 6379
+        echo "Adding slots..."
+        redis-cli -p 7001 CLUSTER ADDSLOTS {0..5460}
+        redis-cli -p 7002 CLUSTER ADDSLOTS {5461..10922}
+        redis-cli -p 7003 CLUSTER ADDSLOTS {10923..16383}
+        echo "Cluster initialized!"
+
+networks:
+  bolt-cluster:
+    driver: bridge
+
+volumes:
+  node1-data:
+  node2-data:
+  node3-data:

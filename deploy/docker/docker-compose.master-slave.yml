@@ -1,0 +1,52 @@
+version: '3.8'
+
+services:
+  bolt-master:
+    image: lbp0200/bolt:latest
+    container_name: bolt-master
+    ports:
+      - "6379:6379"
+    volumes:
+      - master-data:/data
+    restart: unless-stopped
+    command: ["-addr", ":6379", "-dir", "/data"]
+    networks:
+      - bolt-net
+
+  bolt-slave:
+    image: lbp0200/bolt:latest
+    container_name: bolt-slave
+    ports:
+      - "6380:6379"
+    volumes:
+      - slave-data:/data
+    restart: unless-stopped
+    depends_on:
+      bolt-master:
+        condition: service_healthy
+    command: ["-addr", ":6379", "-dir", "/data", "-replicaof", "bolt-master", "6379"]
+    networks:
+      - bolt-net
+
+  bolt-slave2:
+    image: lbp0200/bolt:latest
+    container_name: bolt-slave2
+    ports:
+      - "6381:6379"
+    volumes:
+      - slave2-data:/data
+    restart: unless-stopped
+    depends_on:
+      bolt-master:
+        condition: service_healthy
+    command: ["-addr", ":6379", "-dir", "/data", "-replicaof", "bolt-master", "6379"]
+    networks:
+      - bolt-net
+
+networks:
+  bolt-net:
+
+volumes:
+  master-data:
+  slave-data:
+  slave2-data:

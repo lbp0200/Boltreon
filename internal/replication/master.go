@@ -46,11 +46,13 @@ func NewMasterConnection(addr string) (*MasterConnection, error) {
 		Str("master_addr", addr).
 		Msg("连接到主节点")
 
+	logger.Logger.Debug().Msg("MasterConnection created, about to send commands")
 	return mc, nil
 }
 
 // SendCommand 发送命令到主节点
 func (mc *MasterConnection) SendCommand(cmd [][]byte) error {
+	logger.Logger.Debug().Str("addr", mc.Addr).Msg("SendCommand called")
 	mc.mu.Lock()
 	defer mc.mu.Unlock()
 
@@ -68,6 +70,7 @@ func (mc *MasterConnection) SendCommand(cmd [][]byte) error {
 
 // ReadResponse 读取响应
 func (mc *MasterConnection) ReadResponse() (proto.RESP, error) {
+	logger.Logger.Debug().Str("addr", mc.Addr).Msg("ReadResponse called")
 	mc.mu.RLock()
 	reader := mc.Reader
 	mc.mu.RUnlock()
@@ -75,8 +78,11 @@ func (mc *MasterConnection) ReadResponse() (proto.RESP, error) {
 	// 读取响应类型
 	line, err := reader.ReadBytes('\n')
 	if err != nil {
+		logger.Logger.Error().Err(err).Str("addr", mc.Addr).Msg("Master connection read failed")
 		return nil, fmt.Errorf("read response failed: %w", err)
 	}
+
+	logger.Logger.Debug().Str("addr", mc.Addr).Str("line", string(line)).Msg("Read response line")
 
 	// 去掉\r\n
 	if len(line) > 0 && line[len(line)-1] == '\n' {
@@ -87,6 +93,7 @@ func (mc *MasterConnection) ReadResponse() (proto.RESP, error) {
 	}
 
 	if len(line) == 0 {
+		logger.Logger.Error().Msg("Master connection read empty line - connection may be closed")
 		return nil, fmt.Errorf("empty response")
 	}
 

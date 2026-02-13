@@ -1,0 +1,57 @@
+# Git
+.git
+.gitignore
+
+# Build artifacts
+build/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test coverage
+*.out
+coverage.txt
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Documentation
+docs/
+README.md
+CLAUDE.md
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+.travis.yml
+
+# Development
+*.log
+tmp/
+temp/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local config
+.env
+.env.local
+
+# Redis/Testing
+*.rdb
+dump.rdb
+
+# Docker
+Dockerfile*
+docker-compose*
+.dockerignore
+
+# Development files
+cmd/debug/
+cmd/integration/
+cmd/benchmark/
