@@ -131,21 +131,25 @@ jobs:
           # Build .deb package
           dpkg-deb --build pkg/boltDB boltDB_${VERSION_NUM}_amd64.deb
 
+          # Rename for release upload (from boltDB_1.0.15_amd64.deb to boltDB-v1.0.15-amd64.deb)
+          mv boltDB_${VERSION_NUM}_amd64.deb boltDB-${VERSION}-amd64.deb
+
       - name: Upload Release Assets
-        run: |
-          VERSION_NUM=${VERSION#v}
-          # Upload using gh CLI
-          gh release upload $VERSION \
-            boltDB-${VERSION}-linux-amd64 \
-            boltDB-${VERSION}-linux-arm64 \
-            boltDB-${VERSION}-darwin-amd64 \
-            boltDB-${VERSION}-darwin-arm64 \
-            boltDB-${VERSION}-windows-amd64.exe \
-            boltDB-${VERSION}-checksums.txt \
-            boltDB_${VERSION_NUM}_amd64.deb \
-            --clobber
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            boltDB-${{ env.VERSION }}-linux-amd64
+            boltDB-${{ env.VERSION }}-linux-arm64
+            boltDB-${{ env.VERSION }}-darwin-amd64
+            boltDB-${{ env.VERSION }}-darwin-arm64
+            boltDB-${{ env.VERSION }}-windows-amd64.exe
+            boltDB-${{ env.VERSION }}-checksums.txt
+            boltDB-${{ env.VERSION }}-amd64.deb
+          generate_release_notes: true
+          name: Release ${{ env.VERSION }}
+          draft: false
+          prerelease: false
         env:
-          VERSION: ${{ env.VERSION }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Update Homebrew Formula
