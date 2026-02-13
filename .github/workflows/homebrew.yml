@@ -4,31 +4,47 @@ on:
   release:
     types: [published]
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag (e.g., v1.0.0)'
+        required: false
+        default: ''
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   update-homebrew:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
+      - name: Determine version
+        id: version
+        run: |
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "version=${{ github.event.release.tag_name }}" >> $GITHUB_OUTPUT
+          fi
+
       - name: Checkout homebrew formula
         uses: actions/checkout@v4
         with:
           repository: lbp0200/homebrew-boltdb
           token: ${{ secrets.HOMEBREW_TOKEN }}
           path: homebrew-boltdb
+          ref: main
 
       - name: Download and calculate SHA256
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
-          VERSION=${{ github.event.release.tag_name }}
+          VERSION_NUM=${VERSION#v}
+          echo "Updating to version: $VERSION_NUM"
 
-          for file in boltDB-${VERSION#v}-darwin-arm64 \
-                      boltDB-${VERSION#v}-darwin-amd64 \
-                      boltDB-${VERSION#v}-linux-arm64 \
-                      boltDB-${VERSION#v}-linux-amd64; do
+          for file in boltDB-${VERSION_NUM}-darwin-arm64 \
+                      boltDB-${VERSION_NUM}-darwin-amd64 \
+                      boltDB-${VERSION_NUM}-linux-arm64 \
+                      boltDB-${VERSION_NUM}-linux-amd64; do
             echo "Downloading $file..."
             curl -sL "https://github.com/lbp0200/BoltDB/releases/download/$VERSION/$file" -o "/tmp/$file"
             echo "$file SHA256:"
@@ -36,8 +52,9 @@ jobs:
           done
 
       - name: Update formula
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
-          VERSION=${{ github.event.release.tag_name }}
           VERSION_NUM=${VERSION#v}
 
           # Calculate SHA256 for each platform
@@ -49,28 +66,21 @@ jobs:
           # Update version
           sed -i "s/version \".*\"/version \"$VERSION_NUM\"/" homebrew-boltdb/Formula/boltdb.rb
 
-          # Update SHA256 for darwin-arm64
-          sed -i "0,/sha256 \".*\"$/s//sha256 \"$DARWIN_ARM64\"/" homebrew-boltdb/Formula/boltdb.rb
-
-          # Update SHA256 for darwin-amd64 (second occurrence)
-          sed -i "0,/sha256 \".*\"$/s//sha256 \"$DARWIN_AMD64\"/" homebrew-boltdb/Formula/boltdb.rb
-
-          # Update SHA256 for linux-arm64 (third occurrence)
-          sed -i "0,/sha256 \".*\"$/s//sha256 \"$LINUX_ARM64\"/" homebrew-boltdb/Formula/boltdb.rb
-
-          # Update SHA256 for linux-amd64 (fourth occurrence)
-          sed -i "0,/sha256 \".*\"$/s//sha256 \"$LINUX_AMD64\"/" homebrew-boltdb/Formula/boltdb.rb
+          # Update SHA256 hashes
+          sed -i "0,/sha256 \".*\"/s//sha256 \"$DARWIN_ARM64\"/" homebrew-boltdb/Formula/boltdb.rb
+          sed -i "0,/sha256 \".*\"/s//sha256 \"$DARWIN_AMD64\"/" homebrew-boltdb/Formula/boltdb.rb
+          sed -i "0,/sha256 \".*\"/s//sha256 \"$LINUX_ARM64\"/" homebrew-boltdb/Formula/boltdb.rb
+          sed -i "0,/sha256 \".*\"/s//sha256 \"$LINUX_AMD64\"/" homebrew-boltdb/Formula/boltdb.rb
 
           cat homebrew-boltdb/Formula/boltdb.rb
 
-      - name: Create Pull Request
-        uses: peter-evans/create-pull-request@v6
-        with:
-          token: ${{ secrets.HOMEBREW_TOKEN }}
-          commit-message: "Update BoltDB to ${{ github.event.release.tag_name }}"
-          title: "Update BoltDB to ${{ github.event.release.tag_name }}"
-          body: |
-            Automated update of BoltDB Homebrew formula to ${{ github.event.release.tag_name }}.
-          branch: update-boltdb
-          delete-branch: true
-          repository: lbp0200/homebrew-boltdb
+      - name: Commit and push
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          cd homebrew-boltdb
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add Formula/boltdb.rb
+          git diff --staged --quiet || git commit -m "Update BoltDB to $VERSION"
+          git push
