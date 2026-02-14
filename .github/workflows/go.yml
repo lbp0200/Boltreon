@@ -207,6 +207,14 @@ jobs:
           echo "    bin.install \"boltDB-$VERSION-#{os}-#{arch}\" => \"boltdb\"" >> Formula/boltdb.rb
           echo '  end' >> Formula/boltdb.rb
           echo '' >> Formula/boltdb.rb
+          echo '  service do' >> Formula/boltdb.rb
+          echo '    run opt_bin/"boltdb"' >> Formula/boltdb.rb
+          echo '    keep_alive true' >> Formula/boltdb.rb
+          echo '    run_args << "-dir" << "var/lib/boltdb"' >> Formula/boltdb.rb
+          echo '    log_path "var/log/boltdb.log"' >> Formula/boltdb.rb
+          echo '    error_log_path "var/log/boltdb.err.log"' >> Formula/boltdb.rb
+          echo '  end' >> Formula/boltdb.rb
+          echo '' >> Formula/boltdb.rb
           echo '  test do' >> Formula/boltdb.rb
           echo '    system "#{bin}/boltdb", "--version"' >> Formula/boltdb.rb
           echo '  end' >> Formula/boltdb.rb
