@@ -2,6 +2,8 @@ package server
 
 import (
 	"fmt"
+	"os"
+	"runtime"
 	"strings"
 )
 
@@ -13,12 +15,16 @@ func (h *Handler) buildInfoResponse(section string) string {
 	if section == "" || section == "ALL" || section == "SERVER" {
 		builder.WriteString("# Server\n")
 		builder.WriteString("redis_version:boltdb-8.0.0\n")
-		builder.WriteString("os:linux\n")
+		builder.WriteString("os:" + runtime.GOOS + "\n")
 		builder.WriteString("arch_bits:64\n")
 		builder.WriteString("tcp_port:6379\n")
-		builder.WriteString("multiplexing_api:epoll\n")
-		builder.WriteString("gcc_version:go1.25\n")
-		builder.WriteString("process_id:1\n")
+		if runtime.GOOS == "linux" {
+			builder.WriteString("multiplexing_api:epoll\n")
+		} else {
+			builder.WriteString("multiplexing_api:kqueue\n")
+		}
+		builder.WriteString("gcc_version:go" + runtime.Version()[2:5] + "\n")
+		builder.WriteString(fmt.Sprintf("process_id:%d\n", os.Getpid()))
 		builder.WriteString("run_id:\n")
 		builder.WriteString("tcp_backlog:511\n")
 		builder.WriteString("uptime_in_seconds:0\n")
