@@ -46,6 +46,10 @@ BoltDB 是一个**高性能、磁盘持久化的键值数据库**，完全兼容
 | **Hash** | `HSET`, `HGET`, `HGETALL`, `HINCRBY`, `HDEL` | 哈希表 |
 | **Set** | `SADD`, `SMEMBERS`, `SINTER`, `SDIFF`, `SPOP` | 无序集合 |
 | **Sorted Set** | `ZADD`, `ZRANGE`, `ZSCORE`, `ZINCRBY`, `ZREVRANGE` | 有序集合 |
+| **JSON** | `JSON.SET`, `JSON.GET`, `JSON.DEL`, `JSON.TYPE` | JSON 文档 |
+| **TimeSeries** | `TS.ADD`, `TS.RANGE`, `TS.GET`, `TS.INFO` | 时序数据 |
+| **Geo** | `GEOADD`, `GEOPOS`, `GEOHASH`, `GEODIST`, `GEOSEARCH` | 地理位置 |
+| **Stream** | `XADD`, `XLEN`, `XREAD`, `XRANGE`, `XINFO` | 流数据 |
 
 ### 核心功能
 
