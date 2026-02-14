@@ -211,6 +211,7 @@ jobs:
           echo '    run bin/"boltdb"' >> Formula/boltdb.rb
           echo '    keep_alive true' >> Formula/boltdb.rb
           echo '    working_dir "/var/lib/boltdb"' >> Formula/boltdb.rb
+          echo '    error_log_path "/var/log/boltdb.log"' >> Formula/boltdb.rb
           echo '  end' >> Formula/boltdb.rb
           echo '' >> Formula/boltdb.rb
           echo '  test do' >> Formula/boltdb.rb
