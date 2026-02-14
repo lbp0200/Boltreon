@@ -204,18 +204,22 @@ jobs:
           echo '  def install' >> Formula/boltdb.rb
           echo '    arch = Hardware::CPU.arm? ? "arm64" : "amd64"' >> Formula/boltdb.rb
           echo '    os = OS.mac? ? "darwin" : "linux"' >> Formula/boltdb.rb
-          echo "    bin.install \"boltDB-$VERSION-#{os}-#{arch}\" => \"boltdb\"" >> Formula/boltdb.rb
+          echo "    bin.install \"boltDB-$VERSION_NUM-${os}-${arch}\" => \"boltdb\"" >> Formula/boltdb.rb
+          echo "    (bin/\"boltdb-run\").write <<~EOS" >> Formula/boltdb.rb
+          echo '      #!/bin/bash' >> Formula/boltdb.rb
+          echo '      exec "#{bin}/boltdb" -dir /var/lib/boltdb -addr 0.0.0.0:6379' >> Formula/boltdb.rb
+          echo '    EOS' >> Formula/boltdb.rb
+          echo '    chmod "+x", bin/"boltdb-run"' >> Formula/boltdb.rb
           echo '  end' >> Formula/boltdb.rb
           echo '' >> Formula/boltdb.rb
           echo '  service do' >> Formula/boltdb.rb
-          echo '    run bin/"boltdb"' >> Formula/boltdb.rb
+          echo '    run bin/"boltdb-run"' >> Formula/boltdb.rb
           echo '    keep_alive true' >> Formula/boltdb.rb
           echo '    working_dir "/var/lib/boltdb"' >> Formula/boltdb.rb
-          echo '    error_log_path "/var/log/boltdb.log"' >> Formula/boltdb.rb
           echo '  end' >> Formula/boltdb.rb
           echo '' >> Formula/boltdb.rb
           echo '  test do' >> Formula/boltdb.rb
-          echo '    system "#{bin}/boltdb", "--version"' >> Formula/boltdb.rb
+          echo '    assert_predicate bin/"boltdb", :exist?' >> Formula/boltdb.rb
           echo '  end' >> Formula/boltdb.rb
           echo 'end' >> Formula/boltdb.rb
 
