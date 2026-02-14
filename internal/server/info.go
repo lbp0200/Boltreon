@@ -23,7 +23,7 @@ func (h *Handler) buildInfoResponse(section string) string {
 		} else {
 			builder.WriteString("multiplexing_api:kqueue\n")
 		}
-		builder.WriteString("gcc_version:go" + runtime.Version()[2:5] + "\n")
+		builder.WriteString("gcc_version:" + runtime.Version() + "\n")
 		builder.WriteString(fmt.Sprintf("process_id:%d\n", os.Getpid()))
 		builder.WriteString("run_id:\n")
 		builder.WriteString("tcp_backlog:511\n")
