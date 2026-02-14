@@ -50,6 +50,8 @@ BoltDB is a **high-performance, disk-persistent key-value database** fully compa
 | **Sorted Set** | `ZADD`, `ZRANGE`, `ZSCORE`, `ZINCRBY`, `ZREVRANGE` | 有序集合 |
 | **JSON** | `JSON.SET`, `JSON.GET`, `JSON.DEL`, `JSON.TYPE` | JSON 文档 |
 | **TimeSeries** | `TS.ADD`, `TS.RANGE`, `TS.GET`, `TS.INFO` | 时序数据 |
+| **Geo** | `GEOADD`, `GEOPOS`, `GEOHASH`, `GEODIST`, `GEOSEARCH` | 地理位置 |
+| **Stream** | `XADD`, `XLEN`, `XREAD`, `XRANGE`, `XINFO` | 流数据 |
 
 ### Core Features | 核心功能
 
